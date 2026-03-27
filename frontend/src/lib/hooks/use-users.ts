@@ -1,0 +1,43 @@
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+
+import { api } from "@/lib/api-client"
+import type { PaginatedResponse, User, UserCreate } from "@/lib/types"
+
+export function useUsers(skip = 0, limit = 50) {
+  return useQuery({
+    queryKey: ["users", skip, limit],
+    queryFn: () =>
+      api.get<PaginatedResponse<User>>(`/users?skip=${skip}&limit=${limit}`),
+  })
+}
+
+export function useCreateUser() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (data: UserCreate) => api.post<User>("/users", data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["users"] })
+    },
+  })
+}
+
+export function useUpdateUser() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({ id, data }: { id: string; data: Partial<User> }) =>
+      api.patch<User>(`/users/${id}`, data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["users"] })
+    },
+  })
+}
+
+export function useDeactivateUser() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (id: string) => api.delete(`/users/${id}`),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["users"] })
+    },
+  })
+}

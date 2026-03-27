@@ -1,0 +1,59 @@
+# Dependencies
+node_modules/
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Environment
+.env
+.env.local
+.env.production
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Build
+.next/
+dist/
+build/
+
+# Database
+*.db
+*.sqlite3
+
+# Certificates (NEVER commit)
+*.pem
+*.key
+*.crt
+*.p12
+*.pfx
+
+# Logs
+*.log
+
+# Backups
+backups/
+
+# Docs (private content)
+docs/
+
+# Test data
+test_podaci/
+
+# Screenshots/snapshots
+snapshot*.txt
+
+# Uploads (user-generated)
+backend/uploads/
+
+# Python egg-info
+*.egg-info/
+
+# Batch files (local tooling)
+*.bat

@@ -1,0 +1,17 @@
+{
+  "name": "hm-digital-agent",
+  "version": "0.1.0",
+  "description": "HM Digital Local Agent — CEZIH smart card + VPN bridge",
+  "scripts": {
+    "tauri": "tauri",
+    "dev": "tauri dev",
+    "build": "cp index.html dist/ && cp app.js dist/ && tauri build"
+  },
+  "packageManager": "pnpm@10.28.0",
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.10.1"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "^2.10.1"
+  }
+}

@@ -1,0 +1,60 @@
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+
+import { api } from "@/lib/api-client"
+
+export interface Session {
+  id: string
+  user_id: string
+  user_ime: string
+  user_prezime: string
+  user_email: string
+  created_at: string
+  expires_at: string
+}
+
+export function useSessions() {
+  return useQuery({
+    queryKey: ["sessions"],
+    queryFn: () => api.get<Session[]>("/auth/sessions"),
+  })
+}
+
+export function useRevokeSession() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (sessionId: string) =>
+      api.delete(`/auth/sessions/${sessionId}`),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["sessions"] })
+      queryClient.invalidateQueries({ queryKey: ["plan", "usage"] })
+    },
+  })
+}
+
+export function useRevokeOtherSessions() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: () => {
+      const refreshToken = localStorage.getItem("refresh_token")
+      return api.post<{ revoked_count: number }>("/auth/sessions/revoke-others", {
+        refresh_token: refreshToken,
+      })
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["sessions"] })
+      queryClient.invalidateQueries({ queryKey: ["plan", "usage"] })
+    },
+  })
+}
+
+export function useCleanupTokens() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: () =>
+      api.post<{ cleaned_count: number }>("/auth/sessions/cleanup", {}),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["sessions"] })
+      queryClient.invalidateQueries({ queryKey: ["plan", "usage"] })
+    },
+  })
+}

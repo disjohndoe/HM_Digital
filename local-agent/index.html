@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="hr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>HM Digital Agent</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: #f8fafc;
+      color: #1e293b;
+      padding: 16px;
+      user-select: none;
+      font-size: 13px;
+    }
+    h1 {
+      font-size: 15px;
+      font-weight: 600;
+      margin-bottom: 12px;
+      color: #0f172a;
+    }
+    .status-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 10px;
+      background: white;
+      border-radius: 6px;
+      margin-bottom: 6px;
+      border: 1px solid #e2e8f0;
+    }
+    .dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      flex-shrink: 0;
+    }
+    .dot.green { background: #22c55e; }
+    .dot.red { background: #ef4444; }
+    .dot.gray { background: #94a3b8; }
+    .label { flex: 1; }
+    .detail { color: #64748b; font-size: 11px; }
+    .error {
+      margin-top: 8px;
+      padding: 8px;
+      background: #fef2f2;
+      border: 1px solid #fecaca;
+      border-radius: 6px;
+      color: #991b1b;
+      font-size: 11px;
+    }
+  </style>
+</head>
+<body>
+  <h1>HM Digital Agent</h1>
+
+  <div class="status-row">
+    <span class="dot" id="cloud-dot"></span>
+    <span class="label" id="cloud-label">Oblak</span>
+    <span class="detail" id="cloud-detail"></span>
+  </div>
+
+  <div class="status-row">
+    <span class="dot" id="card-dot"></span>
+    <span class="label" id="card-label">Smart kartica</span>
+    <span class="detail" id="card-detail"></span>
+  </div>
+
+  <div class="status-row">
+    <span class="dot" id="vpn-dot"></span>
+    <span class="label" id="vpn-label">VPN</span>
+    <span class="detail" id="vpn-detail"></span>
+  </div>
+
+  <div class="error" id="error-box" style="display: none;"></div>
+
+  <script src="app.js"></script>
+</body>
+</html>

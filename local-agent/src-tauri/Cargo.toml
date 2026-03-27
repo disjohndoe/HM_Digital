@@ -1,0 +1,27 @@
+[package]
+name = "hm-digital-agent"
+version = "0.1.0"
+description = "HM Digital Local Agent — CEZIH smart card + VPN bridge"
+authors = ["HM Digital"]
+license = "proprietary"
+edition = "2021"
+rust-version = "1.77.2"
+
+[lib]
+name = "app_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2.5.6" }
+
+[dependencies]
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+log = "0.4"
+env_logger = "0.11"
+tauri = { version = "2.10.3", features = ["tray-icon"] }
+tauri-plugin-shell = "2"
+tokio = { version = "1", features = ["full"] }
+tokio-tungstenite = { version = "0.26", features = ["native-tls"] }
+futures-util = "0.3"
+uuid = { version = "1", features = ["v4"] }
