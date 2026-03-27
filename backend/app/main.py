@@ -1,11 +1,12 @@
-from contextlib import asynccontextmanager
 import logging
+from contextlib import asynccontextmanager
 
+import httpx
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api.router import api_router
 from app.api.agent_ws import router as agent_ws_router
+from app.api.router import api_router
 from app.config import settings
 from app.middleware.error_handler import ErrorHandlerMiddleware
 from app.middleware.request_logger import RequestLoggerMiddleware
@@ -18,7 +19,9 @@ logging.basicConfig(
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    app.state.http_client = httpx.AsyncClient(timeout=settings.CEZIH_TIMEOUT)
     yield
+    await app.state.http_client.aclose()
 
 
 app = FastAPI(

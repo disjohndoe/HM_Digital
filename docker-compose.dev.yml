@@ -1,0 +1,30 @@
+# Development override
+# Usage: docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build
+
+services:
+  caddy:
+    profiles:
+      - production-only
+
+  db:
+    ports:
+      - "5433:5432"
+
+  backend:
+    ports:
+      - "8000:8000"
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+    environment:
+      APP_ENV: development
+      APP_DEBUG: "true"
+      DATABASE_URL: postgresql+asyncpg://postgres:${DB_PASSWORD:-postgres}@db:5432/medical_mvp
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000}
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY:-dev-secret-key-not-for-production}
+    volumes:
+      - ./backend:/app
+
+  frontend:
+    ports:
+      - "3000:3000"
+    environment:
+      NEXT_PUBLIC_API_URL: ${API_URL:-http://localhost:8000}

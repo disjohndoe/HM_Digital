@@ -63,3 +63,7 @@ backend/uploads/
 
 # Batch files (local tooling)
 *.bat
+
+# Caddy volumes (safety net)
+caddy_data/
+caddy_config/

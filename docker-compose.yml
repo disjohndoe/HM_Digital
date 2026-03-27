@@ -1,12 +1,32 @@
 services:
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    environment:
+      DOMAIN: ${DOMAIN:-localhost}
+    depends_on:
+      - backend
+      - frontend
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+
   db:
     image: postgres:16-alpine
+    restart: unless-stopped
     environment:
       POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: ${DB_PASSWORD:-postgres}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
       POSTGRES_DB: medical_mvp
-    ports:
-      - "5433:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -23,16 +43,16 @@ services:
 
   backup:
     image: postgres:16-alpine
+    restart: unless-stopped
     volumes:
       - ./backups:/backups
     environment:
-      PGPASSWORD: ${DB_PASSWORD:-postgres}
+      PGPASSWORD: ${DB_PASSWORD}
     entrypoint: |
       sh -c 'while true; do
         TIMESTAMP=$$(date +%Y%m%d_%H%M%S)
         pg_dump -h db -U postgres medical_mvp | gzip > /backups/medical_mvp_$$TIMESTAMP.gz
         echo "[$$TIMESTAMP] Backup completed"
-        # Keep last 30 backups (5 days × 6 backups/day)
         ls -t /backups/medical_mvp_*.gz 2>/dev/null | tail -n +31 | xargs rm -f 2>/dev/null
         sleep 14400
       done'
@@ -42,12 +62,13 @@ services:
 
   backend:
     build: ./backend
-    ports:
-      - "8000:8000"
+    restart: unless-stopped
     environment:
-      DATABASE_URL: postgresql+asyncpg://postgres:${DB_PASSWORD:-postgres}@db:5432/medical_mvp
-      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000}
-      JWT_SECRET_KEY: ${JWT_SECRET_KEY:-change-me-in-production-use-a-long-random-string}
+      APP_ENV: production
+      APP_DEBUG: "false"
+      DATABASE_URL: postgresql+asyncpg://postgres:${DB_PASSWORD}@db:5432/medical_mvp
+      CORS_ORIGINS: https://${DOMAIN}
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY}
     depends_on:
       db:
         condition: service_healthy
@@ -60,10 +81,9 @@ services:
 
   frontend:
     build: ./frontend
-    ports:
-      - "3000:3000"
+    restart: unless-stopped
     environment:
-      NEXT_PUBLIC_API_URL: ${API_URL:-http://localhost:8000}
+      NEXT_PUBLIC_API_URL: https://${DOMAIN}/api
     depends_on:
       - backend
     deploy:
@@ -75,3 +95,5 @@ services:
 
 volumes:
   pgdata:
+  caddy_data:
+  caddy_config:

@@ -375,3 +375,31 @@ def mock_drug_search(query: str) -> list[dict]:
         return []
     q = query.lower()
     return [d for d in MOCK_LIJEKOVI if q in d["naziv"].lower() or q in d["atk"].lower()]
+
+
+# --- Mock Signing ---
+
+
+def mock_sign_document(document_id: str | None = None) -> dict:
+    """Mock remote document signing — returns a fake base64-encoded signature."""
+    import base64
+    import os
+
+    fake_sig = base64.b64encode(os.urandom(256)).decode("ascii")
+    return {
+        "mock": True,
+        "success": True,
+        "signature": fake_sig,
+        "signing_algorithm": "SHA-256",
+        "signed_at": datetime.now(timezone.utc).isoformat(),
+        "document_id": document_id,
+    }
+
+
+def mock_sign_health_check() -> dict:
+    """Mock signing service health check."""
+    return {
+        "mock": True,
+        "reachable": True,
+        "reason": None,
+    }

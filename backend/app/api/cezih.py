@@ -1,8 +1,8 @@
 import json  # noqa: F401
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Request
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -18,10 +18,10 @@ from app.schemas.cezih import (
     CezihActivityListResponse,
     CezihDashboardStats,
     CezihStatusResponse,
-    EReceptRequest,
-    EReceptResponse,
     ENalazRequest,
     ENalazResponse,
+    EReceptRequest,
+    EReceptResponse,
     EUputniceResponse,
     InsuranceCheckRequest,
     InsuranceCheckResponse,
@@ -31,40 +31,50 @@ from app.schemas.cezih import (
     PatientCezihInsurance,
     PatientCezihSummary,
 )
-from app.services import cezih_mock_service
+from app.services.cezih import dispatcher as cezih
 
 router = APIRouter(prefix="/cezih", tags=["cezih"])
 
 
+def _http_client(request: Request):
+    return request.app.state.http_client
+
+
 @router.get("/status", response_model=CezihStatusResponse)
 async def get_cezih_status(
+    request: Request,
     current_user: User = Depends(get_current_user),
 ):
-    return cezih_mock_service.mock_cezih_status(current_user.tenant_id)
+    return await cezih.cezih_status(current_user.tenant_id, http_client=_http_client(request))
 
 
 @router.post("/provjera-osiguranja", response_model=InsuranceCheckResponse)
 async def provjera_osiguranja(
+    request: Request,
     data: InsuranceCheckRequest,
     current_user: User = Depends(require_roles("admin", "doctor", "nurse")),
     db: AsyncSession = Depends(get_db),
 ):
     await check_cezih_access(db, current_user.tenant_id)
-    return await cezih_mock_service.mock_insurance_check(
-        data.mbo, db=db, user_id=current_user.id, tenant_id=current_user.tenant_id
+    return await cezih.insurance_check(
+        data.mbo,
+        db=db, user_id=current_user.id, tenant_id=current_user.tenant_id,
+        http_client=_http_client(request),
     )
 
 
 @router.post("/e-nalaz", response_model=ENalazResponse)
 async def send_enalaz(
+    request: Request,
     data: ENalazRequest,
     current_user: User = Depends(require_roles("admin", "doctor")),
     db: AsyncSession = Depends(get_db),
 ):
     await check_cezih_access(db, current_user.tenant_id)
-    return await cezih_mock_service.mock_send_enalaz(
+    return await cezih.send_enalaz(
         db, current_user.tenant_id, data.patient_id, data.record_id,
         user_id=current_user.id, uputnica_id=data.uputnica_id,
+        http_client=_http_client(request),
     )
 
 
@@ -74,33 +84,35 @@ async def list_euputnice(
     db: AsyncSession = Depends(get_db),
 ):
     """Return all persisted e-Uputnice for the tenant."""
-    return await cezih_mock_service.get_stored_euputnice(
-        db=db, tenant_id=current_user.tenant_id,
-    )
+    return await cezih.get_stored_euputnice(db=db, tenant_id=current_user.tenant_id)
 
 
 @router.post("/e-uputnica/preuzmi", response_model=EUputniceResponse)
 async def retrieve_euputnice(
+    request: Request,
     current_user: User = Depends(require_roles("admin", "doctor", "nurse")),
     db: AsyncSession = Depends(get_db),
 ):
     await check_cezih_access(db, current_user.tenant_id)
-    return await cezih_mock_service.mock_retrieve_euputnice(
-        db=db, user_id=current_user.id, tenant_id=current_user.tenant_id
+    return await cezih.retrieve_euputnice(
+        db=db, user_id=current_user.id, tenant_id=current_user.tenant_id,
+        http_client=_http_client(request),
     )
 
 
 @router.post("/e-recept", response_model=EReceptResponse)
 async def send_erecept(
+    request: Request,
     data: EReceptRequest,
     current_user: User = Depends(require_roles("admin", "doctor")),
     db: AsyncSession = Depends(get_db),
 ):
     await check_cezih_access(db, current_user.tenant_id)
-    lijekovi_dicts = [l.model_dump() for l in data.lijekovi]
-    return await cezih_mock_service.mock_send_erecept(
+    lijekovi_dicts = [item.model_dump() for item in data.lijekovi]
+    return await cezih.send_erecept(
         data.patient_id, lijekovi_dicts,
         db=db, user_id=current_user.id, tenant_id=current_user.tenant_id,
+        http_client=_http_client(request),
     )
 
 
@@ -228,7 +240,7 @@ async def get_cezih_dashboard_stats(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    today_start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+    today_start = datetime.now(UTC).replace(hour=0, minute=0, second=0, microsecond=0)
 
     # Today's CEZIH operations count
     count_result = await db.execute(
@@ -273,4 +285,4 @@ async def search_drugs(
     q: str = Query("", min_length=0),
     current_user: User = Depends(get_current_user),
 ):
-    return cezih_mock_service.mock_drug_search(q)
+    return cezih.drug_search(q)
