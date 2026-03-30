@@ -12,7 +12,6 @@ from app.services.cezih.service import (
     _map_fhir_status,
 )
 
-
 # --- Pure helper tests (no mocking needed) ---
 
 
@@ -105,14 +104,21 @@ class TestCheckInsurance:
                     "name": [{"family": "Horvat", "given": ["Ivan"], "use": "official"}],
                     "birthDate": "1985-03-15",
                     "identifier": [
-                        {"system": "http://fhir.cezih.hr/specifikacije/identifikatori/osiguranje", "value": "HR-123456"},
+                        {
+                            "system": "http://fhir.cezih.hr/specifikacije/identifikatori/osiguranje",
+                            "value": "HR-123456",
+                        },
                     ],
                 },
             }],
         })
 
         with patch("app.services.cezih.service.CezihFhirClient", return_value=mock_fhir):
-            result = await __import__("app.services.cezih.service", fromlist=["check_insurance"]).check_insurance(mock_client, "999990260")
+            svc = __import__(
+                "app.services.cezih.service",
+                fromlist=["check_insurance"],
+            )
+            result = await svc.check_insurance(mock_client, "999990260")
 
         assert result["mbo"] == "999990260"
         assert result["ime"] == "Ivan"
@@ -127,7 +133,11 @@ class TestCheckInsurance:
         mock_fhir.get = AsyncMock(return_value={"resourceType": "Bundle", "entry": []})
 
         with patch("app.services.cezih.service.CezihFhirClient", return_value=mock_fhir):
-            result = await __import__("app.services.cezih.service", fromlist=["check_insurance"]).check_insurance(mock_client, "000000000")
+            svc = __import__(
+                "app.services.cezih.service",
+                fromlist=["check_insurance"],
+            )
+            result = await svc.check_insurance(mock_client, "000000000")
 
         assert result["status_osiguranja"] == "Nije pronađen"
         assert result["ime"] == ""

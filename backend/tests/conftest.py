@@ -6,8 +6,8 @@ from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.database import get_db
-from app.models.base import Base
 from app.main import app
+from app.models.base import Base
 
 TEST_DATABASE_URL = "postgresql+asyncpg://postgres:postgres@localhost:5433/medical_mvp_test"
 
@@ -46,7 +46,7 @@ async def client(db_session: AsyncSession) -> AsyncGenerator[AsyncClient, None]:
         yield db_session
 
     app.dependency_overrides[get_db] = override_get_db
-    transport = ASGITransport(app=app)
+    transport = ASGITransport(app=app)  # type: ignore[arg-type]
     async with AsyncClient(transport=transport, base_url="http://test") as ac:
         yield ac
     app.dependency_overrides.clear()
@@ -73,7 +73,7 @@ async def auth_headers_doctor(client: AsyncClient, auth_headers: dict[str, str])
     # First get the admin's tenant info
     me_resp = await client.get("/api/auth/me", headers=auth_headers)
     me_data = me_resp.json()
-    tenant_id = me_data["tenant_id"]
+    me_data["tenant_id"]
 
     # Create doctor via the users API (admin can create users)
     # Actually, we need to use the user creation endpoint. Let's register another tenant

@@ -1,6 +1,5 @@
 """Tests for backend/app/services/cezih/oauth.py — OAuth2 token management."""
 
-import time
 from unittest.mock import AsyncMock, patch
 
 import pytest

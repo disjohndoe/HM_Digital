@@ -7,7 +7,7 @@ from httpx import AsyncClient
 @pytest.mark.asyncio
 async def test_create_medical_record(client: AsyncClient, auth_headers: dict[str, str], test_patient_id: str):
     me_resp = await client.get("/api/auth/me", headers=auth_headers)
-    doctor_id = me_resp.json()["id"]
+    me_resp.json()["id"]
 
     payload = {
         "patient_id": test_patient_id,
@@ -27,7 +27,9 @@ async def test_create_medical_record(client: AsyncClient, auth_headers: dict[str
 
 
 @pytest.mark.asyncio
-async def test_create_medical_record_short_sadrzaj(client: AsyncClient, auth_headers: dict[str, str], test_patient_id: str):
+async def test_create_medical_record_short_sadrzaj(
+    client: AsyncClient, auth_headers: dict[str, str], test_patient_id: str,
+):
     payload = {
         "patient_id": test_patient_id,
         "datum": date.today().isoformat(),
@@ -84,7 +86,9 @@ async def test_list_medical_records(client: AsyncClient, auth_headers: dict[str,
 
 
 @pytest.mark.asyncio
-async def test_filter_medical_records_by_patient(client: AsyncClient, auth_headers: dict[str, str], test_patient_id: str):
+async def test_filter_medical_records_by_patient(
+    client: AsyncClient, auth_headers: dict[str, str], test_patient_id: str,
+):
     # Create a record
     payload = {
         "patient_id": test_patient_id,

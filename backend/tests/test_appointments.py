@@ -1,5 +1,4 @@
-import uuid
-from datetime import date, datetime, timedelta
+from datetime import date, timedelta
 
 import pytest
 from httpx import AsyncClient
@@ -142,7 +141,7 @@ async def test_available_slots(client: AsyncClient, auth_headers: dict[str, str]
 
     tomorrow = date.today() + timedelta(days=1)
     resp = await client.get(
-        f"/api/appointments/available-slots",
+        "/api/appointments/available-slots",
         params={"doktor_id": doctor_id, "date": tomorrow.isoformat(), "trajanje_minuta": 30},
         headers=auth_headers,
     )
