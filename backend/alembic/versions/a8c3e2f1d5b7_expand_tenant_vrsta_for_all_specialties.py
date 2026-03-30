@@ -7,14 +7,14 @@ Create Date: 2026-03-24
 Expand tenant vrsta from 3 dental-only options to 7 specialty-agnostic options.
 Change default from 'stomatoloska' to 'privatna_ordinacija'.
 """
-from typing import Sequence, Union
+from collections.abc import Sequence
 
 from alembic import op
 
 revision: str = "a8c3e2f1d5b7"
-down_revision: Union[str, None] = "c1af963d4ec1"
-branch_labels: Union[str, Sequence[str], None] = None
-depends_on: Union[str, Sequence[str], None] = None
+down_revision: str | None = "c1af963d4ec1"
+branch_labels: str | Sequence[str] | None = None
+depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
@@ -25,7 +25,8 @@ def upgrade() -> None:
     op.create_check_constraint(
         "ck_tenant_vrsta",
         "tenants",
-        "vrsta IN ('privatna_ordinacija', 'stomatoloska', 'poliklinika', 'opca_medicina', 'dom_zdravlja', 'laboratorij', 'dijagnosticki_centar')",
+        "vrsta IN ('privatna_ordinacija', 'stomatoloska', 'poliklinika', "
+        "'opca_medicina', 'dom_zdravlja', 'laboratorij', 'dijagnosticki_centar')",
     )
 
     # Update existing default value
@@ -40,7 +41,8 @@ def upgrade() -> None:
 def downgrade() -> None:
     # Revert migrated rows back
     op.execute(
-        "UPDATE tenants SET vrsta = 'stomatoloska' WHERE vrsta NOT IN ('stomatoloska', 'poliklinika', 'privatna_ordinacija')"
+        "UPDATE tenants SET vrsta = 'stomatoloska' "
+        "WHERE vrsta NOT IN ('stomatoloska', 'poliklinika', 'privatna_ordinacija')"
     )
     op.execute(
         "UPDATE tenants SET vrsta = 'stomatoloska' WHERE vrsta = 'privatna_ordinacija'"

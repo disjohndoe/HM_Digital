@@ -5,9 +5,10 @@ Revises: 001_expand_tenant
 Create Date: 2026-03-24 20:30:00.000000
 
 """
-from alembic import op
 import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
+
+from alembic import op
 
 revision = "002_add_documents"
 down_revision = "001_expand_tenant"
