@@ -20,6 +20,7 @@ class UserRead(BaseModel):
     created_at: datetime
     card_holder_name: str | None = None
     card_certificate_oib: str | None = None
+    card_required: bool = False
 
     model_config = {"from_attributes": True}
 
@@ -48,6 +49,7 @@ class UserUpdate(BaseModel):
     is_active: bool | None = None
     card_holder_name: str | None = None
     card_certificate_oib: str | None = None
+    card_required: bool | None = None
 
 
 class CardBindingRequest(BaseModel):

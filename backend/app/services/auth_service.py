@@ -260,6 +260,24 @@ async def revoke_other_sessions(db: AsyncSession, tenant_id, current_refresh_has
     return count
 
 
+async def revoke_user_sessions(db: AsyncSession, tenant_id, user_id) -> int:
+    """Revoke all active sessions for a specific user within a tenant."""
+    now = datetime.now(UTC)
+    result = await db.execute(
+        select(RefreshToken).join(User, RefreshToken.user_id == User.id).where(
+            User.tenant_id == tenant_id,
+            RefreshToken.user_id == user_id,
+            RefreshToken.is_revoked.is_(False),
+            RefreshToken.expires_at > now,
+        )
+    )
+    count = 0
+    for token in result.scalars().all():
+        token.is_revoked = True
+        count += 1
+    return count
+
+
 async def cleanup_expired_tokens(db: AsyncSession) -> int:
     """Delete revoked and expired refresh tokens. Returns count of removed rows."""
     now = datetime.now(UTC)

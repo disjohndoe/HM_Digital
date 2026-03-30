@@ -17,6 +17,7 @@ class AgentConnection:
     card_inserted: bool = False
     vpn_connected: bool = False
     card_holder: str | None = None
+    card_removed_at: datetime | None = None
 
 
 class AgentConnectionManager:
@@ -71,6 +72,10 @@ class AgentConnectionManager:
         if not conn:
             return
         if card_inserted is not None:
+            if conn.card_inserted and not card_inserted:
+                conn.card_removed_at = datetime.now(UTC)
+            elif card_inserted:
+                conn.card_removed_at = None
             conn.card_inserted = card_inserted
         if vpn_connected is not None:
             conn.vpn_connected = vpn_connected
