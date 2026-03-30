@@ -29,18 +29,17 @@ async def _write_audit(
     resource_id: UUID | None = None,
     details: dict | None = None,
 ) -> None:
-    from app.models.audit_log import AuditLog
+    from app.services.audit_service import write_audit
 
-    entry = AuditLog(
+    await write_audit(
+        db,
         tenant_id=tenant_id,
         user_id=user_id,
         action=action,
         resource_type="cezih",
         resource_id=resource_id,
-        details=json.dumps(details, default=str) if details else None,
+        details=details,
     )
-    db.add(entry)
-    await db.flush()
 
 
 # --- Dispatch functions ---
