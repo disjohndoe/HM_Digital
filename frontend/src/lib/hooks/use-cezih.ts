@@ -2,15 +2,31 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 
 import { api } from "@/lib/api-client"
 import type {
+  CaseActionResponse,
+  CaseResponse,
+  CasesListResponse,
   CezihActivityListResponse,
   CezihDashboardStats,
   CezihStatusResponse,
+  CodeSystemItem,
+  CreateCaseRequest,
+  CreateVisitRequest,
+  DocumentActionResponse,
+  DocumentSearchItem,
   ENalazResponse,
   EReceptResponse,
   EUputniceResponse,
+  ForeignerRegistrationRequest,
+  ForeignerRegistrationResponse,
   InsuranceCheckResponse,
   LijekItem,
+  OidLookupResponse,
+  OrganizationItem,
   PatientCezihSummary,
+  PractitionerItem,
+  ValueSetExpandResponse,
+  VisitActionResponse,
+  VisitResponse,
 } from "@/lib/types"
 
 export function useCezihStatus() {
@@ -28,6 +44,7 @@ export function useInsuranceCheck() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["cezih", "activity"] })
       queryClient.invalidateQueries({ queryKey: ["cezih", "dashboard-stats"] })
+      queryClient.invalidateQueries({ queryKey: ["cezih", "patient"] })
     },
   })
 }
@@ -126,5 +143,273 @@ export function useDrugSearch(query: string) {
     queryFn: () =>
       api.get<LijekItem[]>(`/cezih/lijekovi?q=${encodeURIComponent(query)}`),
     enabled: query.length >= 2,
+  })
+}
+
+
+// ============================================================
+// TC6: OID Registry Lookup
+// ============================================================
+
+export function useOidLookup() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (oid: string) =>
+      api.post<OidLookupResponse>("/cezih/oid-lookup", { oid }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["cezih", "activity"] }),
+  })
+}
+
+
+// ============================================================
+// TC7: Code System Query
+// ============================================================
+
+export function useCodeSystemQuery(system: string, query: string) {
+  return useQuery({
+    queryKey: ["cezih", "code-system", system, query],
+    queryFn: () =>
+      api.get<CodeSystemItem[]>(`/cezih/code-system?system=${encodeURIComponent(system)}&q=${encodeURIComponent(query)}`),
+    enabled: query.length >= 1,
+  })
+}
+
+
+// ============================================================
+// TC8: Value Set Expand
+// ============================================================
+
+export function useValueSetExpand(url: string, filter?: string) {
+  return useQuery({
+    queryKey: ["cezih", "value-set", url, filter],
+    queryFn: () => {
+      const params = new URLSearchParams({ url })
+      if (filter) params.set("filter", filter)
+      return api.get<ValueSetExpandResponse>(`/cezih/value-set?${params}`)
+    },
+    enabled: !!url,
+  })
+}
+
+
+// ============================================================
+// TC9: Subject Registry (mCSD)
+// ============================================================
+
+export function useOrganizationSearch(name: string) {
+  return useQuery({
+    queryKey: ["cezih", "organizations", name],
+    queryFn: () =>
+      api.get<OrganizationItem[]>(`/cezih/organizations?name=${encodeURIComponent(name)}`),
+    enabled: name.length >= 2,
+  })
+}
+
+export function usePractitionerSearch(name: string) {
+  return useQuery({
+    queryKey: ["cezih", "practitioners", name],
+    queryFn: () =>
+      api.get<PractitionerItem[]>(`/cezih/practitioners?name=${encodeURIComponent(name)}`),
+    enabled: name.length >= 2,
+  })
+}
+
+
+// ============================================================
+// TC11: Foreigner Registration
+// ============================================================
+
+export function useRegisterForeigner() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (data: ForeignerRegistrationRequest) =>
+      api.post<ForeignerRegistrationResponse>("/cezih/patients/foreigner", data),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["cezih", "activity"] }),
+  })
+}
+
+
+// ============================================================
+// TC12-14: Visit Management
+// ============================================================
+
+export function useCreateVisit() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (data: CreateVisitRequest) =>
+      api.post<VisitResponse>("/cezih/visits", data),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["cezih", "visits"] })
+      qc.invalidateQueries({ queryKey: ["cezih", "activity"] })
+      qc.invalidateQueries({ queryKey: ["cezih", "dashboard-stats"] })
+    },
+  })
+}
+
+export function useUpdateVisit() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ visitId, ...data }: { visitId: string; period_start?: string; admission_type_code?: string }) =>
+      api.put<VisitActionResponse>(`/cezih/visits/${visitId}`, data),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["cezih", "visits"] })
+      qc.invalidateQueries({ queryKey: ["cezih", "activity"] })
+    },
+  })
+}
+
+export function useCloseVisit() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ visitId, ...data }: { visitId: string; period_end: string; diagnosis_case_id?: string }) =>
+      api.post<VisitActionResponse>(`/cezih/visits/${visitId}/close`, data),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["cezih", "visits"] })
+      qc.invalidateQueries({ queryKey: ["cezih", "activity"] })
+      qc.invalidateQueries({ queryKey: ["cezih", "dashboard-stats"] })
+    },
+  })
+}
+
+export function useReopenVisit() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (visitId: string) =>
+      api.post<VisitActionResponse>(`/cezih/visits/${visitId}/reopen`, {}),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["cezih", "visits"] })
+      qc.invalidateQueries({ queryKey: ["cezih", "activity"] })
+    },
+  })
+}
+
+export function useCancelVisit() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (visitId: string) =>
+      api.delete<VisitActionResponse>(`/cezih/visits/${visitId}`),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["cezih", "visits"] })
+      qc.invalidateQueries({ queryKey: ["cezih", "activity"] })
+      qc.invalidateQueries({ queryKey: ["cezih", "dashboard-stats"] })
+    },
+  })
+}
+
+
+// ============================================================
+// TC15-17: Case Management
+// ============================================================
+
+export function useRetrieveCases(mbo: string) {
+  return useQuery({
+    queryKey: ["cezih", "cases", mbo],
+    queryFn: () =>
+      api.get<CasesListResponse>(`/cezih/cases?mbo=${encodeURIComponent(mbo)}`),
+    enabled: !!mbo,
+  })
+}
+
+export function useCreateCase() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (data: CreateCaseRequest) =>
+      api.post<CaseResponse>("/cezih/cases", data),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["cezih", "cases"] })
+      qc.invalidateQueries({ queryKey: ["cezih", "activity"] })
+      qc.invalidateQueries({ queryKey: ["cezih", "dashboard-stats"] })
+    },
+  })
+}
+
+export function useUpdateCaseStatus() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ caseId, mbo, action }: { caseId: string; mbo: string; action: string }) =>
+      api.put<CaseActionResponse>(`/cezih/cases/${caseId}/status?mbo=${encodeURIComponent(mbo)}`, { action }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["cezih", "cases"] })
+      qc.invalidateQueries({ queryKey: ["cezih", "activity"] })
+    },
+  })
+}
+
+export function useUpdateCaseData() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ caseId, mbo, ...data }: {
+      caseId: string; mbo: string;
+      current_clinical_status?: string; verification_status?: string;
+      icd_code?: string; icd_display?: string;
+      onset_date?: string; abatement_date?: string; note?: string;
+    }) =>
+      api.put<CaseActionResponse>(`/cezih/cases/${caseId}/data?mbo=${encodeURIComponent(mbo)}`, data),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["cezih", "cases"] })
+      qc.invalidateQueries({ queryKey: ["cezih", "activity"] })
+    },
+  })
+}
+
+
+// ============================================================
+// TC19-22: Document Operations
+// ============================================================
+
+export function useDocumentSearch(params: {
+  mbo?: string; type?: string; date_from?: string; date_to?: string; status?: string;
+}) {
+  const searchParams = new URLSearchParams()
+  if (params.mbo) searchParams.set("mbo", params.mbo)
+  if (params.type) searchParams.set("type", params.type)
+  if (params.date_from) searchParams.set("date_from", params.date_from)
+  if (params.date_to) searchParams.set("date_to", params.date_to)
+  if (params.status) searchParams.set("status", params.status)
+  const qs = searchParams.toString()
+
+  return useQuery({
+    queryKey: ["cezih", "documents", params],
+    queryFn: () =>
+      api.get<DocumentSearchItem[]>(`/cezih/documents${qs ? `?${qs}` : ""}`),
+    enabled: !!(params.mbo || params.type),
+  })
+}
+
+export function useReplaceDocument() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (referenceId: string) =>
+      api.put<DocumentActionResponse>(`/cezih/e-nalaz/${referenceId}`, {}),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["cezih", "documents"] })
+      qc.invalidateQueries({ queryKey: ["cezih", "activity"] })
+      qc.invalidateQueries({ queryKey: ["cezih", "patient"] })
+    },
+  })
+}
+
+export function useCancelDocument() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (referenceId: string) =>
+      api.delete<DocumentActionResponse>(`/cezih/e-nalaz/${referenceId}`),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["cezih", "documents"] })
+      qc.invalidateQueries({ queryKey: ["cezih", "activity"] })
+      qc.invalidateQueries({ queryKey: ["cezih", "patient"] })
+    },
+  })
+}
+
+export function useRetrieveDocument() {
+  return useMutation({
+    mutationFn: async (referenceId: string) => {
+      const response = await fetch(`/api/cezih/e-nalaz/${referenceId}/document`, {
+        headers: { Authorization: `Bearer ${localStorage.getItem("access_token")}` },
+      })
+      if (!response.ok) throw new Error("Failed to retrieve document")
+      return response.blob()
+    },
   })
 }

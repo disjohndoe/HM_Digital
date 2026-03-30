@@ -1,10 +1,17 @@
+import { CreditCard } from "lucide-react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { useCezihStatus } from "@/lib/hooks/use-cezih"
+import { useCardStatus } from "@/lib/hooks/use-users"
+import { useAuth } from "@/lib/auth"
 import { MockBadge } from "./mock-badge"
 
 export function CezihStatusCard() {
   const { data, isLoading } = useCezihStatus()
+  const { data: cardStatus } = useCardStatus()
+  const { user } = useAuth()
+
+  const isMyCard = cardStatus?.matched_doctor_id === user?.id
 
   return (
     <Card>
@@ -36,6 +43,42 @@ export function CezihStatusCard() {
               <span className="text-sm">
                 {data.agent_connected ? "Povezan" : "Nije povezan"}
               </span>
+            </div>
+
+            <div className="border-t pt-3 space-y-2">
+              <div className="flex items-center gap-2">
+                <CreditCard className="h-4 w-4 text-muted-foreground" />
+                <span className="text-sm text-muted-foreground">AKD Kartica:</span>
+                {cardStatus?.card_inserted ? (
+                  <Badge variant="outline" className="gap-1">
+                    {cardStatus.card_holder ?? "Nepoznato"}
+                  </Badge>
+                ) : (
+                  <span className="text-sm">Nije umetnuta</span>
+                )}
+              </div>
+              {cardStatus?.card_inserted && cardStatus?.matched_doctor_name && (
+                <div className="flex items-center gap-2 pl-6">
+                  <span
+                    className={`inline-block h-2 w-2 rounded-full ${
+                      isMyCard ? "bg-green-500" : "bg-orange-500"
+                    }`}
+                  />
+                  <span className="text-sm">
+                    {isMyCard
+                      ? "Vaša kartica"
+                      : `Kartica: ${cardStatus.matched_doctor_name}`}
+                  </span>
+                </div>
+              )}
+              {cardStatus?.card_inserted && !cardStatus?.matched_doctor_name && (
+                <div className="flex items-center gap-2 pl-6">
+                  <span className="inline-block h-2 w-2 rounded-full bg-red-500" />
+                  <span className="text-sm text-muted-foreground">
+                    Kartica nije povezana s korisnikom
+                  </span>
+                </div>
+              )}
             </div>
           </div>
         ) : null}

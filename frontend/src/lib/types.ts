@@ -30,6 +30,8 @@ export interface User {
   last_login_at: string | null;
   tenant_id: string;
   created_at: string;
+  card_holder_name: string | null;
+  card_certificate_oib: string | null;
   tenant?: Tenant;
 }
 
@@ -340,6 +342,17 @@ export interface AgentSecretResponse {
   agent_secret: string;
 }
 
+// --- Card Status ---
+
+export interface CardStatusResponse {
+  agent_connected: boolean;
+  card_inserted: boolean;
+  card_holder: string | null;
+  vpn_connected: boolean;
+  matched_doctor_id: string | null;
+  matched_doctor_name: string | null;
+}
+
 // --- CEZIH ---
 
 export interface CezihStatusResponse {
@@ -459,4 +472,172 @@ export interface LijekItem {
   naziv: string;
   oblik: string;
   jacina: string;
+}
+
+// ============================================================
+// TC6: OID Registry
+// ============================================================
+
+export interface OidLookupResponse {
+  mock: boolean;
+  oid: string;
+  name: string;
+  responsible_org: string;
+  status: string;
+}
+
+// ============================================================
+// TC7: Code System Query
+// ============================================================
+
+export interface CodeSystemItem {
+  mock: boolean;
+  code: string;
+  display: string;
+  system: string;
+}
+
+// ============================================================
+// TC8: Value Set Expand
+// ============================================================
+
+export interface ValueSetExpandResponse {
+  mock: boolean;
+  url: string;
+  concepts: { code: string; display: string; system: string }[];
+  total: number;
+}
+
+// ============================================================
+// TC9: Subject Registry
+// ============================================================
+
+export interface OrganizationItem {
+  mock: boolean;
+  id: string;
+  name: string;
+  hzzo_code: string;
+  active: boolean;
+}
+
+export interface PractitionerItem {
+  mock: boolean;
+  id: string;
+  family: string;
+  given: string;
+  hzjz_id: string;
+  active: boolean;
+}
+
+// ============================================================
+// TC11: Foreigner Registration
+// ============================================================
+
+export interface ForeignerRegistrationRequest {
+  ime: string;
+  prezime: string;
+  datum_rodjenja: string;
+  spol?: string;
+  drzavljanstvo?: string;
+  broj_putovnice?: string;
+  ehic_broj?: string;
+}
+
+export interface ForeignerRegistrationResponse {
+  mock: boolean;
+  success: boolean;
+  patient_id: string;
+  mbo: string;
+}
+
+// ============================================================
+// TC12-14: Visit Management
+// ============================================================
+
+export interface CreateVisitRequest {
+  patient_id: string;
+  patient_mbo: string;
+  period_start: string;
+  admission_type_code?: string;
+}
+
+export interface VisitResponse {
+  mock: boolean;
+  success: boolean;
+  visit_id: string;
+  status?: string;
+  created_at?: string;
+}
+
+export interface VisitActionResponse {
+  mock: boolean;
+  success: boolean;
+  visit_id?: string;
+  status?: string;
+}
+
+// ============================================================
+// TC15-17: Case Management
+// ============================================================
+
+export interface CaseItem {
+  mock: boolean;
+  case_id: string;
+  icd_code: string;
+  icd_display: string;
+  clinical_status: string;
+  onset_date: string;
+}
+
+export interface CasesListResponse {
+  mock: boolean;
+  cases: CaseItem[];
+}
+
+export interface CreateCaseRequest {
+  patient_id: string;
+  patient_mbo: string;
+  icd_code: string;
+  icd_display: string;
+  onset_date: string;
+  verification_status?: string;
+  note?: string;
+}
+
+export interface CaseResponse {
+  mock: boolean;
+  success: boolean;
+  local_case_id: string;
+  cezih_case_id: string;
+}
+
+export interface CaseActionResponse {
+  mock: boolean;
+  success: boolean;
+  case_id?: string;
+  action?: string;
+}
+
+// ============================================================
+// TC19-22: Document Operations
+// ============================================================
+
+export interface DocumentSearchItem {
+  mock: boolean;
+  id: string;
+  datum_izdavanja: string;
+  izdavatelj: string;
+  svrha: string;
+  specijalist: string;
+  status: string;
+  type?: string;
+}
+
+export interface DocumentActionResponse {
+  mock: boolean;
+  success: boolean;
+  reference_id?: string;
+  new_reference_id?: string;
+  replaced_reference_id?: string;
+  status?: string;
 }
