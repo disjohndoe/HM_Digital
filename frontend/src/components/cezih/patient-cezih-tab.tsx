@@ -1,7 +1,7 @@
 "use client"
 
 import { useState } from "react"
-import { Loader2, Shield, Pill, FileText } from "lucide-react"
+import { Loader2, Shield, Pill, FileText, Trash2 } from "lucide-react"
 import { toast } from "sonner"
 
 import { Button } from "@/components/ui/button"
@@ -15,12 +15,13 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
+import { ConfirmDialog } from "@/components/shared/confirm-dialog"
 import { Skeleton } from "@/components/ui/skeleton"
 import { MockBadge } from "@/components/cezih/mock-badge"
 import { EReceptDialog } from "@/components/cezih/e-recept-dialog"
 import { VisitManagement } from "@/components/cezih/visit-management"
 import { CaseManagement } from "@/components/cezih/case-management"
-import { usePatientCezihSummary, useInsuranceCheck } from "@/lib/hooks/use-cezih"
+import { usePatientCezihSummary, useInsuranceCheck, useCancelERecept } from "@/lib/hooks/use-cezih"
 import { OSIGURANJE_STATUS, RECORD_TIP } from "@/lib/constants"
 import { formatDateTimeHR } from "@/lib/utils"
 
@@ -32,7 +33,9 @@ interface PatientCezihTabProps {
 export function PatientCezihTab({ patientId, patientMbo }: PatientCezihTabProps) {
   const { data: summary, isLoading } = usePatientCezihSummary(patientId)
   const insuranceCheck = useInsuranceCheck()
+  const cancelERecept = useCancelERecept()
   const [eReceptOpen, setEReceptOpen] = useState(false)
+  const [stornoTarget, setStornoTarget] = useState<string | null>(null)
 
   const handleCheckInsurance = () => {
     if (!patientMbo) {
@@ -202,18 +205,48 @@ export function PatientCezihTab({ patientId, patientMbo }: PatientCezihTabProps)
                   <TableHead>Datum</TableHead>
                   <TableHead>ID recepta</TableHead>
                   <TableHead>Lijekovi</TableHead>
+                  <TableHead>Status</TableHead>
+                  <TableHead className="text-right">Akcije</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {summary.e_recept_history.map((item) => (
-                  <TableRow key={item.recept_id}>
-                    <TableCell className="text-sm">{formatDateTimeHR(item.datum)}</TableCell>
-                    <TableCell className="font-mono text-xs">{item.recept_id}</TableCell>
-                    <TableCell className="text-sm max-w-[200px] truncate">
-                      {item.lijekovi.join(", ") || "—"}
-                    </TableCell>
-                  </TableRow>
-                ))}
+                {summary.e_recept_history.map((item) => {
+                  const isStorniran = (item as { status?: string }).status === "storniran"
+                  return (
+                    <TableRow key={item.recept_id}>
+                      <TableCell className="text-sm">{formatDateTimeHR(item.datum)}</TableCell>
+                      <TableCell className="font-mono text-xs">{item.recept_id}</TableCell>
+                      <TableCell className="text-sm max-w-[200px] truncate">
+                        {item.lijekovi.join(", ") || "—"}
+                      </TableCell>
+                      <TableCell>
+                        <Badge
+                          variant="outline"
+                          className={
+                            isStorniran
+                              ? "bg-red-100 text-red-800 border-red-200"
+                              : "bg-green-100 text-green-800 border-green-200"
+                          }
+                        >
+                          {isStorniran ? "Storniran" : "Aktivan"}
+                        </Badge>
+                      </TableCell>
+                      <TableCell className="text-right">
+                        {!isStorniran && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-8 w-8 p-0 text-destructive hover:text-destructive"
+                            onClick={() => setStornoTarget(item.recept_id)}
+                            title="Storno e-Recepta"
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </Button>
+                        )}
+                      </TableCell>
+                    </TableRow>
+                  )
+                })}
               </TableBody>
             </Table>
           )}
@@ -232,6 +265,27 @@ export function PatientCezihTab({ patientId, patientMbo }: PatientCezihTabProps)
         open={eReceptOpen}
         onOpenChange={setEReceptOpen}
         patientId={patientId}
+      />
+
+      {/* Storno confirmation dialog */}
+      <ConfirmDialog
+        open={!!stornoTarget}
+        onOpenChange={(open: boolean) => !open && setStornoTarget(null)}
+        title="Storno e-Recepta"
+        description={`Jeste li sigurni da želite stornirati e-Recept ${stornoTarget || ""}? Ova radnja se ne može poništiti.`}
+        confirmLabel="Storno"
+        variant="destructive"
+        onConfirm={() => {
+          if (!stornoTarget) return
+          cancelERecept.mutate(stornoTarget, {
+            onSuccess: () => {
+              toast.success("e-Recept storniran")
+              setStornoTarget(null)
+            },
+            onError: (err) => toast.error(err.message || "Greška pri stornu e-Recepta"),
+          })
+        }}
+        loading={cancelERecept.isPending}
       />
     </div>
   )

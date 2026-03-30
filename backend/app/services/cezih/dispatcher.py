@@ -281,6 +281,32 @@ async def send_erecept(
     return result
 
 
+async def cancel_erecept(
+    recept_id: str,
+    *,
+    db: AsyncSession | None = None,
+    user_id: UUID | None = None,
+    tenant_id: UUID | None = None,
+    http_client=None,
+) -> dict:
+    if _is_mock():
+        return await cezih_mock_service.mock_cancel_erecept(
+            recept_id, db=db, user_id=user_id, tenant_id=tenant_id,
+        )
+    try:
+        result = await real_service.cancel_erecept(http_client, recept_id)
+    except CezihError as e:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=e.message) from e
+    if db and user_id and tenant_id:
+        await _write_audit(
+            db, tenant_id, user_id,
+            action="e_recept_cancel",
+            details={"recept_id": recept_id, "mode": "real"},
+        )
+    result["mock"] = False
+    return result
+
+
 async def cezih_status(tenant_id=None, *, http_client=None) -> dict:
     if _is_mock():
         mock_result = cezih_mock_service.mock_cezih_status(tenant_id)

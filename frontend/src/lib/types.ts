@@ -410,6 +410,13 @@ export interface EReceptResponse {
   recept_id: string;
 }
 
+export interface EReceptStornoResponse {
+  mock: boolean;
+  success: boolean;
+  recept_id: string;
+  status: string;
+}
+
 // --- CEZIH Activity Log ---
 
 export interface CezihActivityItem {

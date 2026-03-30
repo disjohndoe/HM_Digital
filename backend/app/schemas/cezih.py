@@ -66,6 +66,13 @@ class EReceptResponse(BaseModel):
     recept_id: str
 
 
+class EReceptStornoResponse(BaseModel):
+    mock: bool = True
+    success: bool
+    recept_id: str
+    status: str
+
+
 class CezihStatusResponse(BaseModel):
     mock: bool = True
     connected: bool

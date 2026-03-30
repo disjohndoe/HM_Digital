@@ -33,6 +33,7 @@ from app.schemas.cezih import (
     ENalazResponse,
     EReceptRequest,
     EReceptResponse,
+    EReceptStornoResponse,
     EUputniceResponse,
     ForeignerRegistrationRequest,
     ForeignerRegistrationResponse,
@@ -135,6 +136,21 @@ async def send_erecept(
     lijekovi_dicts = [item.model_dump() for item in data.lijekovi]
     return await cezih.send_erecept(
         data.patient_id, lijekovi_dicts,
+        db=db, user_id=current_user.id, tenant_id=current_user.tenant_id,
+        http_client=_http_client(request),
+    )
+
+
+@router.delete("/e-recept/{recept_id}", response_model=EReceptStornoResponse)
+async def cancel_erecept(
+    request: Request,
+    recept_id: str,
+    current_user: User = Depends(require_roles("admin", "doctor")),
+    db: AsyncSession = Depends(get_db),
+):
+    await check_cezih_access(db, current_user.tenant_id)
+    return await cezih.cancel_erecept(
+        recept_id,
         db=db, user_id=current_user.id, tenant_id=current_user.tenant_id,
         http_client=_http_client(request),
     )

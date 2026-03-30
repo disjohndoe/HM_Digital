@@ -313,6 +313,26 @@ async def mock_send_erecept(
     }
 
 
+async def mock_cancel_erecept(
+    recept_id: str,
+    db: AsyncSession | None = None,
+    user_id: UUID | None = None,
+    tenant_id: UUID | None = None,
+) -> dict:
+    if db and user_id and tenant_id:
+        await _write_audit(
+            db, tenant_id, user_id,
+            action="e_recept_cancel",
+            details={"recept_id": recept_id},
+        )
+    return {
+        "mock": True,
+        "success": True,
+        "recept_id": recept_id,
+        "status": "storniran",
+    }
+
+
 def mock_cezih_status(tenant_id=None) -> dict:
     from app.services.agent_connection_manager import agent_manager
 

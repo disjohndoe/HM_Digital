@@ -236,6 +236,16 @@ async def send_erecept(
     }
 
 
+async def cancel_erecept(client: httpx.AsyncClient, recept_id: str) -> dict:
+    """Cancel/storno an e-prescription (stub — real API not yet implemented)."""
+    logger.warning("CEZIH e-Recept storno: real API not yet implemented, returning stub")
+    return {
+        "success": True,
+        "recept_id": recept_id,
+        "status": "storniran",
+    }
+
+
 async def get_status(client: httpx.AsyncClient) -> dict:
     """Check CEZIH connectivity."""
     fhir_client = CezihFhirClient(client)

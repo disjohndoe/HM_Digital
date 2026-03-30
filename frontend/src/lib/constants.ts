@@ -155,6 +155,7 @@ export const CEZIH_ACTION_LABELS: Record<string, string> = {
   e_nalaz_send: "Slanje e-Nalaza",
   e_uputnica_retrieve: "Dohvat e-Uputnica",
   e_recept_send: "Slanje e-Recepta",
+  e_recept_cancel: "Storno e-Recepta",
   visit_create: "Kreiranje posjete",
   visit_update: "Ažuriranje posjete",
   visit_close: "Zatvaranje posjete",
@@ -179,6 +180,8 @@ export const CEZIH_ACTION_LABELS: Record<string, string> = {
   document_cancel: "Storno dokumenta",
   document_retrieve: "Dohvat dokumenta",
   sign_document: "Potpisivanje dokumenta",
+  e_nalaz_cancel: "Storno e-Nalaza",
+  e_nalaz_replace: "Zamjena e-Nalaza",
 };
 
 export const CEZIH_ACTION_COLORS: Record<string, string> = {
@@ -186,6 +189,7 @@ export const CEZIH_ACTION_COLORS: Record<string, string> = {
   e_nalaz_send: "bg-green-100 text-green-800 border-green-200",
   e_uputnica_retrieve: "bg-purple-100 text-purple-800 border-purple-200",
   e_recept_send: "bg-orange-100 text-orange-800 border-orange-200",
+  e_recept_cancel: "bg-red-100 text-red-800 border-red-200",
   visit_create: "bg-teal-100 text-teal-800 border-teal-200",
   visit_update: "bg-teal-100 text-teal-800 border-teal-200",
   visit_close: "bg-teal-100 text-teal-800 border-teal-200",
@@ -200,6 +204,12 @@ export const CEZIH_ACTION_COLORS: Record<string, string> = {
   case_reopen: "bg-indigo-100 text-indigo-800 border-indigo-200",
   case_delete: "bg-red-100 text-red-800 border-red-200",
   foreigner_register: "bg-amber-100 text-amber-800 border-amber-200",
+  document_cancel: "bg-red-100 text-red-800 border-red-200",
+  document_replace: "bg-amber-100 text-amber-800 border-amber-200",
+  document_retrieve: "bg-blue-100 text-blue-800 border-blue-200",
+  sign_document: "bg-green-100 text-green-800 border-green-200",
+  e_nalaz_cancel: "bg-red-100 text-red-800 border-red-200",
+  e_nalaz_replace: "bg-amber-100 text-amber-800 border-amber-200",
 };
 
 // --- Navigation ---

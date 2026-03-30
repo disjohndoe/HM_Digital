@@ -15,6 +15,7 @@ import type {
   DocumentSearchItem,
   ENalazResponse,
   EReceptResponse,
+  EReceptStornoResponse,
   EUputniceResponse,
   ForeignerRegistrationRequest,
   ForeignerRegistrationResponse,
@@ -101,6 +102,18 @@ export function useSendERecept() {
       queryClient.invalidateQueries({ queryKey: ["cezih", "activity"] })
       queryClient.invalidateQueries({ queryKey: ["cezih", "dashboard-stats"] })
       queryClient.invalidateQueries({ queryKey: ["cezih", "patient"] })
+    },
+  })
+}
+
+export function useCancelERecept() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (receptId: string) =>
+      api.delete<EReceptStornoResponse>(`/cezih/e-recept/${receptId}`),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["cezih", "patient"] })
+      qc.invalidateQueries({ queryKey: ["cezih", "activity"] })
     },
   })
 }
@@ -385,6 +398,7 @@ export function useReplaceDocument() {
       qc.invalidateQueries({ queryKey: ["cezih", "documents"] })
       qc.invalidateQueries({ queryKey: ["cezih", "activity"] })
       qc.invalidateQueries({ queryKey: ["cezih", "patient"] })
+      qc.invalidateQueries({ queryKey: ["medical-records"] })
     },
   })
 }
@@ -398,6 +412,7 @@ export function useCancelDocument() {
       qc.invalidateQueries({ queryKey: ["cezih", "documents"] })
       qc.invalidateQueries({ queryKey: ["cezih", "activity"] })
       qc.invalidateQueries({ queryKey: ["cezih", "patient"] })
+      qc.invalidateQueries({ queryKey: ["medical-records"] })
     },
   })
 }
