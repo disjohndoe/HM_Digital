@@ -253,6 +253,7 @@ export interface MedicalRecord {
   cezih_sent: boolean;
   cezih_sent_at: string | null;
   cezih_reference_id: string | null;
+  sensitivity: string;
   doktor_ime: string | null;
   doktor_prezime: string | null;
   tenant_id: string;
@@ -268,6 +269,7 @@ export interface MedicalRecordCreate {
   dijagnoza_mkb?: string | null;
   dijagnoza_tekst?: string | null;
   sadrzaj: string;
+  sensitivity?: string;
 }
 
 export interface MedicalRecordUpdate {
@@ -277,6 +279,7 @@ export interface MedicalRecordUpdate {
   dijagnoza_mkb?: string | null;
   dijagnoza_tekst?: string | null;
   sadrzaj?: string | null;
+  sensitivity?: string | null;
 }
 
 // --- Dashboard ---

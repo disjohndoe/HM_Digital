@@ -12,12 +12,13 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
-import { RECORD_TIP_OPTIONS } from "@/lib/constants"
+import { RECORD_TIP_OPTIONS, RECORD_SENSITIVITY_OPTIONS } from "@/lib/constants"
 import {
   useCreateMedicalRecord,
   useUpdateMedicalRecord,
 } from "@/lib/hooks/use-medical-records"
 import { useUploadDocument } from "@/lib/hooks/use-documents"
+import { usePermissions } from "@/lib/hooks/use-permissions"
 import type { MedicalRecord, MedicalRecordCreate, MedicalRecordUpdate } from "@/lib/types"
 
 const recordSchema = z.object({
@@ -26,6 +27,7 @@ const recordSchema = z.object({
   dijagnoza_mkb: z.string().optional(),
   dijagnoza_tekst: z.string().optional(),
   sadrzaj: z.string().min(10, "Sadržaj mora imati najmanje 10 znakova"),
+  sensitivity: z.string().optional(),
 })
 
 type RecordFormData = z.infer<typeof recordSchema>
@@ -42,6 +44,7 @@ const MAX_SIZE_MB = 10
 
 export function RecordForm({ open, onOpenChange, patientId, record }: RecordFormProps) {
   const isEdit = !!record
+  const { canSetRecordSensitivity } = usePermissions()
   const createMutation = useCreateMedicalRecord()
   const updateMutation = useUpdateMedicalRecord()
   const uploadDoc = useUploadDocument()
@@ -61,6 +64,7 @@ export function RecordForm({ open, onOpenChange, patientId, record }: RecordForm
   })
 
   const tipValue = watch("tip")
+  const sensitivityValue = watch("sensitivity")
 
   // Sync open prop with native <dialog>
   useEffect(() => {
@@ -103,6 +107,7 @@ export function RecordForm({ open, onOpenChange, patientId, record }: RecordForm
           dijagnoza_mkb: record.dijagnoza_mkb ?? undefined,
           dijagnoza_tekst: record.dijagnoza_tekst ?? undefined,
           sadrzaj: record.sadrzaj,
+          sensitivity: record.sensitivity ?? "standard",
         })
       } else {
         reset({
@@ -111,6 +116,7 @@ export function RecordForm({ open, onOpenChange, patientId, record }: RecordForm
           dijagnoza_mkb: undefined,
           dijagnoza_tekst: undefined,
           sadrzaj: "",
+          sensitivity: "standard",
         })
       }
     }
@@ -125,6 +131,7 @@ export function RecordForm({ open, onOpenChange, patientId, record }: RecordForm
           dijagnoza_mkb: data.dijagnoza_mkb || null,
           dijagnoza_tekst: data.dijagnoza_tekst || null,
           sadrzaj: data.sadrzaj,
+          sensitivity: data.sensitivity || null,
         }
         await updateMutation.mutateAsync({ id: record.id, data: payload })
         toast.success("Zapis ažuriran")
@@ -136,6 +143,7 @@ export function RecordForm({ open, onOpenChange, patientId, record }: RecordForm
           dijagnoza_mkb: data.dijagnoza_mkb || null,
           dijagnoza_tekst: data.dijagnoza_tekst || null,
           sadrzaj: data.sadrzaj,
+          sensitivity: data.sensitivity || "standard",
         }
         await createMutation.mutateAsync(payload)
         if (attachedFile) {
@@ -240,6 +248,23 @@ export function RecordForm({ open, onOpenChange, patientId, record }: RecordForm
               />
             </div>
           </div>
+
+          {canSetRecordSensitivity && (
+            <div className="space-y-2">
+              <Label>Osjetljivost zapisa</Label>
+              <select
+                value={sensitivityValue ?? "standard"}
+                onChange={(e) => setValue("sensitivity", e.target.value)}
+                className="h-8 w-full rounded-lg border border-input bg-transparent px-2.5 py-1 text-sm appearance-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 dark:bg-input/30"
+              >
+                {RECORD_SENSITIVITY_OPTIONS.map((opt) => (
+                  <option key={opt.value} value={opt.value}>
+                    {opt.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
 
           <div className="space-y-2">
             <Label htmlFor="sadrzaj">Sadržaj *</Label>

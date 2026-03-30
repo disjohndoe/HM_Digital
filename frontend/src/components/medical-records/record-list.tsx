@@ -25,7 +25,7 @@ import { RecordForm } from "./record-form"
 import { RecordDetail } from "./record-detail"
 import { useMedicalRecords } from "@/lib/hooks/use-medical-records"
 import { usePermissions } from "@/lib/hooks/use-permissions"
-import { RECORD_TIP_OPTIONS, RECORD_TIP_COLORS } from "@/lib/constants"
+import { RECORD_TIP_OPTIONS, RECORD_TIP_COLORS, RECORD_SENSITIVITY, RECORD_SENSITIVITY_COLORS } from "@/lib/constants"
 import { formatDateHR } from "@/lib/utils"
 import type { MedicalRecord } from "@/lib/types"
 
@@ -117,6 +117,14 @@ export function RecordList({ patientId }: RecordListProps) {
                     : "—"}
                 </TableCell>
                 <TableCell className="hidden sm:table-cell">
+                  {r.sensitivity && r.sensitivity !== "standard" && (
+                    <Badge
+                      variant="secondary"
+                      className={`mr-1 ${RECORD_SENSITIVITY_COLORS[r.sensitivity] || ""}`}
+                    >
+                      {RECORD_SENSITIVITY[r.sensitivity]}
+                    </Badge>
+                  )}
                   <Badge variant={r.cezih_sent ? "default" : "outline"} className={r.cezih_sent ? "bg-green-100 text-green-800" : "text-muted-foreground"}>
                     {r.cezih_sent ? "Poslan" : "Nije poslan"}
                   </Badge>

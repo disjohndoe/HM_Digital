@@ -27,6 +27,9 @@ export interface Permissions {
 
   // CEZIH operations (requires formal authorization + personal credential)
   canPerformCezihOps: boolean
+
+  // Access control
+  canSetRecordSensitivity: boolean
 }
 
 const ROLE_PERMISSIONS: Record<Role, Permissions> = {
@@ -44,6 +47,7 @@ const ROLE_PERMISSIONS: Record<Role, Permissions> = {
     canDeleteProcedure: true,
     canUploadDocuments: false,
     canPerformCezihOps: false,
+    canSetRecordSensitivity: false,
   },
   doctor: {
     canViewSettings: false,
@@ -59,6 +63,7 @@ const ROLE_PERMISSIONS: Record<Role, Permissions> = {
     canDeleteProcedure: true,
     canUploadDocuments: true,
     canPerformCezihOps: true,
+    canSetRecordSensitivity: true,
   },
   nurse: {
     canViewSettings: false,
@@ -74,6 +79,7 @@ const ROLE_PERMISSIONS: Record<Role, Permissions> = {
     canDeleteProcedure: false,
     canUploadDocuments: true,
     canPerformCezihOps: false,
+    canSetRecordSensitivity: false,
   },
   receptionist: {
     canViewSettings: false,
@@ -89,6 +95,7 @@ const ROLE_PERMISSIONS: Record<Role, Permissions> = {
     canDeleteProcedure: false,
     canUploadDocuments: false,
     canPerformCezihOps: false,
+    canSetRecordSensitivity: false,
   },
 }
 
@@ -105,6 +112,7 @@ export function usePermissions(): Permissions {
       canViewCezih: true,
       canViewClinicalData: true,
       canPerformCezihOps: true,
+      canSetRecordSensitivity: true,
     }
   }
 

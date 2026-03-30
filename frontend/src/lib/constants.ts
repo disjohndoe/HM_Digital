@@ -148,6 +148,24 @@ export const OSIGURANJE_STATUS: Record<string, { label: string; color: string }>
   Neaktivan: { label: "Neaktivan", color: "bg-red-100 text-red-800" },
 };
 
+// --- Record Sensitivity ---
+
+export const RECORD_SENSITIVITY: Record<string, string> = {
+  standard: "Standardno",
+  nursing: "Sestrinska dokumentacija",
+  restricted: "Ograničeno",
+};
+
+export const RECORD_SENSITIVITY_OPTIONS = Object.entries(RECORD_SENSITIVITY).map(
+  ([value, label]) => ({ value, label })
+);
+
+export const RECORD_SENSITIVITY_COLORS: Record<string, string> = {
+  standard: "bg-gray-100 text-gray-800",
+  nursing: "bg-blue-100 text-blue-800",
+  restricted: "bg-red-100 text-red-800",
+};
+
 // --- CEZIH Activity ---
 
 export const CEZIH_ACTION_LABELS: Record<string, string> = {
@@ -182,6 +200,10 @@ export const CEZIH_ACTION_LABELS: Record<string, string> = {
   sign_document: "Potpisivanje dokumenta",
   e_nalaz_cancel: "Storno e-Nalaza",
   e_nalaz_replace: "Zamjena e-Nalaza",
+  patient_read: "Pregled kartona pacijenta",
+  medical_record_read: "Pregled medicinskog zapisa",
+  emergency_access: "Hitni pristup",
+  card_removal_session_revoked: "Sesija prekinuta (kartica uklonjena)",
 };
 
 export const CEZIH_ACTION_COLORS: Record<string, string> = {
