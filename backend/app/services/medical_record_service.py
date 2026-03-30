@@ -36,6 +36,7 @@ def _record_row_to_dict(row) -> dict:
         "cezih_sent": rec.cezih_sent,
         "cezih_sent_at": rec.cezih_sent_at,
         "cezih_reference_id": rec.cezih_reference_id,
+        "sensitivity": rec.sensitivity,
         "doktor_ime": row.doktor_ime,
         "doktor_prezime": row.doktor_prezime,
         "created_at": rec.created_at,
@@ -52,6 +53,7 @@ async def list_records(
     date_to: date | None = None,
     skip: int = 0,
     limit: int = 20,
+    user_role: str | None = None,
 ) -> tuple[list[dict], int]:
     conditions = [MedicalRecord.tenant_id == tenant_id]
 
@@ -63,6 +65,10 @@ async def list_records(
         conditions.append(MedicalRecord.datum >= date_from)
     if date_to:
         conditions.append(MedicalRecord.datum <= date_to)
+
+    # Nurse sensitivity filter
+    if user_role == "nurse":
+        conditions.append(MedicalRecord.sensitivity.in_(["standard", "nursing"]))
 
     base = select(MedicalRecord).where(and_(*conditions))
     count_q = select(func.count()).select_from(base.subquery())
@@ -79,6 +85,7 @@ async def get_record(
     db: AsyncSession,
     tenant_id: uuid.UUID,
     record_id: uuid.UUID,
+    user_role: str | None = None,
 ) -> dict:
     base = select(MedicalRecord).where(
         MedicalRecord.id == record_id,
@@ -89,6 +96,12 @@ async def get_record(
     row = result.one_or_none()
     if not row:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Medicinski zapis nije pronađen")
+
+    record = row[0]
+    # Nurse cannot view restricted records
+    if user_role == "nurse" and record.sensitivity == "restricted":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Nemate pristup ovom zapisu")
+
     return _record_row_to_dict(row)
 
 
@@ -108,6 +121,7 @@ async def create_record(
         dijagnoza_mkb=data.dijagnoza_mkb,
         dijagnoza_tekst=data.dijagnoza_tekst,
         sadrzaj=data.sadrzaj,
+        sensitivity=data.sensitivity,
     )
     db.add(record)
     await db.flush()

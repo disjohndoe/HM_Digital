@@ -23,7 +23,11 @@ async def list_patients(
     db: AsyncSession = Depends(get_db),
 ):
     patients, total = await patient_service.list_patients(
-        db, current_user.tenant_id, search=search, skip=skip, limit=limit
+        db,
+        current_user.tenant_id,
+        search=search,
+        skip=skip,
+        limit=limit,
     )
     return PaginatedResponse(items=patients, total=total, skip=skip, limit=limit)
 

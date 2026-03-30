@@ -38,6 +38,7 @@ async def list_medical_records(
         date_to=date_to,
         skip=skip,
         limit=limit,
+        user_role=current_user.role,
     )
     return PaginatedResponse(items=items, total=total, skip=skip, limit=limit)
 
@@ -57,7 +58,9 @@ async def get_medical_record(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    return await medical_record_service.get_record(db, current_user.tenant_id, record_id)
+    return await medical_record_service.get_record(
+        db, current_user.tenant_id, record_id, user_role=current_user.role
+    )
 
 
 @router.patch("/medical-records/{record_id}", response_model=MedicalRecordRead)

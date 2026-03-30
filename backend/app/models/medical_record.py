@@ -1,7 +1,7 @@
 import uuid
 from datetime import date, datetime
 
-from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Index, String, Text
+from sqlalchemy import Boolean, CheckConstraint, Date, DateTime, ForeignKey, Index, String, Text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -12,6 +12,7 @@ class MedicalRecord(BaseTenantModel):
     __tablename__ = "medical_records"
     __table_args__ = (
         Index("ix_medical_records_patient", "tenant_id", "patient_id", "datum"),
+        CheckConstraint("sensitivity IN ('standard', 'nursing', 'restricted')", name="ck_record_sensitivity"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
@@ -28,3 +29,4 @@ class MedicalRecord(BaseTenantModel):
     cezih_sent: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
     cezih_sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     cezih_reference_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    sensitivity: Mapped[str] = mapped_column(String(20), nullable=False, server_default="standard")

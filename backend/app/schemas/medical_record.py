@@ -12,12 +12,20 @@ class MedicalRecordCreate(BaseModel):
     dijagnoza_mkb: str | None = None
     dijagnoza_tekst: str | None = None
     sadrzaj: str
+    sensitivity: str = "standard"
 
     @field_validator("sadrzaj")
     @classmethod
     def validate_sadrzaj(cls, v: str) -> str:
         if len(v.strip()) < 10:
             raise ValueError("Sadržaj mora imati najmanje 10 znakova")
+        return v
+
+    @field_validator("sensitivity")
+    @classmethod
+    def validate_sensitivity(cls, v: str) -> str:
+        if v not in ("standard", "nursing", "restricted"):
+            raise ValueError("Osjetljivost mora biti: standard, nursing ili restricted")
         return v
 
 
@@ -34,6 +42,7 @@ class MedicalRecordRead(BaseModel):
     cezih_sent: bool
     cezih_sent_at: datetime | None
     cezih_reference_id: str | None
+    sensitivity: str
     doktor_ime: str | None = None
     doktor_prezime: str | None = None
     tenant_id: UUID
@@ -50,6 +59,7 @@ class MedicalRecordUpdate(BaseModel):
     dijagnoza_mkb: str | None = None
     dijagnoza_tekst: str | None = None
     sadrzaj: str | None = None
+    sensitivity: str | None = None
 
     @field_validator("sadrzaj")
     @classmethod
