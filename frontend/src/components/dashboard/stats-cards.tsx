@@ -82,6 +82,9 @@ export function StatsCards() {
           </div>
           <p className="text-2xl font-bold mt-2">
             {CEZIH_STATUS[stats.cezih_status] ?? stats.cezih_status}
+            {stats.cezih_status === "nepovezano" && (
+              <span className="text-sm font-normal text-muted-foreground"> (DEMO)</span>
+            )}
           </p>
         </CardContent>
       </Card>
