@@ -1,6 +1,7 @@
 "use client";
 
 import React, { createContext, useContext, useEffect, useState, useCallback } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import type { User, TokenResponse, LoginRequest, RegisterRequest } from "@/lib/types";
 import { api } from "@/lib/api-client";
 
@@ -19,6 +20,7 @@ const AuthContext = createContext<AuthContextType | null>(null);
 const LOGOUT_MAX_RETRIES = 2;
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
+  const queryClient = useQueryClient();
   const [user, setUser] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
@@ -56,6 +58,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const login = async (data: LoginRequest) => {
     const res = await api.post<TokenResponse>("/auth/login", data);
     handleTokenResponse(res);
+    // Clear any stale query cache so dashboard fetches fresh data for this session
+    queryClient.clear();
   };
 
   const register = async (data: RegisterRequest) => {
@@ -80,6 +84,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
     }
     clearAuth();
+    queryClient.clear();
   };
 
   return (

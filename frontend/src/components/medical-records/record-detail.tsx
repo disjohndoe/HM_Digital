@@ -14,9 +14,9 @@ import {
   SheetTitle,
   SheetDescription,
 } from "@/components/ui/sheet"
-import { RECORD_TIP, RECORD_TIP_COLORS, CEZIH_ELIGIBLE_TYPES, CEZIH_MANDATORY_TYPES } from "@/lib/constants"
 import { formatDateHR, formatDateTimeHR, formatCurrencyEUR } from "@/lib/utils"
 import { useSendENalaz, useCancelDocument, useReplaceDocument } from "@/lib/hooks/use-cezih"
+import { useRecordTypeMaps } from "@/lib/hooks/use-record-types"
 import { usePermissions } from "@/lib/hooks/use-permissions"
 import { usePerformedProcedures } from "@/lib/hooks/use-procedures"
 import { MockBadge } from "@/components/cezih/mock-badge"
@@ -40,6 +40,8 @@ export function RecordDetail({ open, onOpenChange, record, patientId, onEdit }: 
   const [eReceptOpen, setEReceptOpen] = useState(false)
   const [confirmCancel, setConfirmCancel] = useState(false)
   const [confirmReplace, setConfirmReplace] = useState(false)
+
+  const { tipLabelMap, tipColorMap, isCezihMandatory, isCezihEligible } = useRecordTypeMaps()
 
   const handleSendENalaz = () => {
     sendENalaz.mutate(
@@ -90,9 +92,9 @@ export function RecordDetail({ open, onOpenChange, record, patientId, onEdit }: 
           <SheetTitle className="flex items-center gap-2">
             <Badge
               variant="secondary"
-              className={RECORD_TIP_COLORS[record.tip] || ""}
+              className={tipColorMap[record.tip] || ""}
             >
-              {RECORD_TIP[record.tip] || record.tip}
+              {tipLabelMap[record.tip] || record.tip}
             </Badge>
             <span>{formatDateHR(record.datum)}</span>
           </SheetTitle>
@@ -185,9 +187,9 @@ export function RecordDetail({ open, onOpenChange, record, patientId, onEdit }: 
               <h4 className="text-sm font-medium text-muted-foreground">CEZIH status</h4>
               <MockBadge />
             </div>
-            {!CEZIH_ELIGIBLE_TYPES.has(record.tip) ? (
+            {!isCezihEligible.has(record.tip) ? (
               <p className="text-xs text-muted-foreground">
-                Ovaj tip zapisa ({RECORD_TIP[record.tip] || record.tip}) nije predviđen za slanje na CEZIH.
+                Ovaj tip zapisa ({tipLabelMap[record.tip] || record.tip}) nije predviđen za slanje na CEZIH.
               </p>
             ) : record.cezih_sent ? (
               <div className="space-y-2">
@@ -244,7 +246,7 @@ export function RecordDetail({ open, onOpenChange, record, patientId, onEdit }: 
               </div>
             ) : (
               <div className="space-y-2">
-                {CEZIH_MANDATORY_TYPES.has(record.tip) && (
+                {isCezihMandatory.has(record.tip) && (
                   <div className="rounded-md bg-amber-50 border border-amber-200 px-3 py-2">
                     <p className="text-xs font-medium text-amber-800">
                       Obavezno slanje na CEZIH (čl. 23, NN 14/2019)

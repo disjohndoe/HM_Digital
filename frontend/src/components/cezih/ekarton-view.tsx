@@ -24,7 +24,8 @@ import {
   useRetrieveDocument,
   useInsuranceCheck,
 } from "@/lib/hooks/use-cezih"
-import { OSIGURANJE_STATUS, RECORD_TIP } from "@/lib/constants"
+import { OSIGURANJE_STATUS } from "@/lib/constants"
+import { useRecordTypeMaps } from "@/lib/hooks/use-record-types"
 import { formatDateTimeHR } from "@/lib/utils"
 
 const CLINICAL_STATUS_COLORS: Record<string, string> = {
@@ -53,6 +54,7 @@ export function EkartonView({ patientId, patientMbo, alergije, fetchTime }: Ekar
   const casesQuery = useRetrieveCases(patientMbo ?? "")
   const retrieveDoc = useRetrieveDocument()
   const insuranceCheck = useInsuranceCheck()
+  const { tipLabelMap } = useRecordTypeMaps()
 
   const handleCheckInsurance = () => {
     if (!patientMbo) return
@@ -258,7 +260,7 @@ export function EkartonView({ patientId, patientMbo, alergije, fetchTime }: Ekar
                       {n.cezih_storno ? "Storniran" : "Poslan"}
                     </Badge>
                     <span className="text-sm text-muted-foreground">
-                      {RECORD_TIP[n.tip] || n.tip}
+                      {tipLabelMap[n.tip] || n.tip}
                     </span>
                     <span className="text-xs text-muted-foreground">
                       {formatDateTimeHR(n.datum)}

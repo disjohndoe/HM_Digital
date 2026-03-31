@@ -237,6 +237,7 @@ export interface PerformedProcedureCreate {
 
 // --- Medical Records ---
 
+// System types only — custom types are dynamically configured per tenant
 export type RecordTip =
   | "ambulantno_izvjesce"
   | "specijalisticki_nalaz"
@@ -247,6 +248,37 @@ export type RecordTip =
   | "preporuka"
   | "epikriza"
   | "anamneza";
+
+// --- Record Types (tenant-configurable) ---
+
+export interface RecordType {
+  id: string;
+  tenant_id: string;
+  slug: string;
+  label: string;
+  color: string | null;
+  is_system: boolean;
+  is_cezih_mandatory: boolean;
+  is_cezih_eligible: boolean;
+  is_active: boolean;
+  sort_order: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface RecordTypeCreate {
+  slug: string;
+  label: string;
+  color?: string | null;
+  sort_order?: number;
+}
+
+export interface RecordTypeUpdate {
+  label?: string | null;
+  color?: string | null;
+  is_active?: boolean | null;
+  sort_order?: number | null;
+}
 
 export interface MedicalRecord {
   id: string;

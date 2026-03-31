@@ -71,6 +71,9 @@ export const PROCEDURE_KATEGORIJA_OPTIONS = Object.entries(PROCEDURE_KATEGORIJA)
 );
 
 // --- Medical Records ---
+// DEPRECATED: These are kept as fallback defaults only.
+// Record types are now tenant-configurable. Use useRecordTypeMaps() hook.
+// These constants serve as fallback when API data is not yet loaded.
 
 export const RECORD_TIP: Record<string, string> = {
   // CEZIH mandatory types (čl. 23, NN 14/2019)

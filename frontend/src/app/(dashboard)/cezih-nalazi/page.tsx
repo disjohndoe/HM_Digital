@@ -21,11 +21,7 @@ import { MockBadge } from "@/components/cezih/mock-badge"
 import { useCezihUnsentRecords } from "@/lib/hooks/use-medical-records"
 import { useSendENalaz } from "@/lib/hooks/use-cezih"
 import { usePermissions } from "@/lib/hooks/use-permissions"
-import {
-  CEZIH_MANDATORY_TYPES,
-  RECORD_TIP,
-  RECORD_TIP_COLORS,
-} from "@/lib/constants"
+import { useRecordTypeMaps } from "@/lib/hooks/use-record-types"
 import { formatDateHR } from "@/lib/utils"
 
 function CheckIcon({ checked }: { checked: boolean }) {
@@ -42,10 +38,11 @@ export default function CezihNalaziPage() {
   const { canPerformCezihOps } = usePermissions()
   const { data, isLoading } = useCezihUnsentRecords()
   const sendENalaz = useSendENalaz()
+  const { tipLabelMap, tipColorMap, isCezihMandatory } = useRecordTypeMaps()
 
   const allRecords = data?.items ?? []
   const records = allRecords.filter(
-    (r) => CEZIH_MANDATORY_TYPES.has(r.tip) && !r.cezih_sent
+    (r) => isCezihMandatory.has(r.tip) && !r.cezih_sent
   )
 
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
@@ -205,9 +202,9 @@ export default function CezihNalaziPage() {
                   <TableCell>
                     <Badge
                       variant="secondary"
-                      className={`text-xs ${RECORD_TIP_COLORS[r.tip] || ""}`}
+                      className={`text-xs ${tipColorMap[r.tip] || ""}`}
                     >
-                      {RECORD_TIP[r.tip] || r.tip}
+                      {tipLabelMap[r.tip] || r.tip}
                     </Badge>
                   </TableCell>
                   <TableCell className="hidden md:table-cell">

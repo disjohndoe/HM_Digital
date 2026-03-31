@@ -41,7 +41,7 @@ import {
   useProcedures,
 } from "@/lib/hooks/use-procedures"
 import { useMedicalRecords } from "@/lib/hooks/use-medical-records"
-import { RECORD_TIP } from "@/lib/constants"
+import { useRecordTypeMaps } from "@/lib/hooks/use-record-types"
 import { formatDateHR, formatCurrencyEUR } from "@/lib/utils"
 import type { PerformedProcedureCreate } from "@/lib/types"
 
@@ -65,6 +65,7 @@ export function PerformedList({ patientId }: PerformedListProps) {
   const { data: proceduresData } = useProcedures(undefined, undefined, 0, 100)
   const { data: recordsData } = useMedicalRecords(patientId)
   const createMutation = useCreatePerformed()
+  const { tipLabelMap } = useRecordTypeMaps()
 
   const procedures = proceduresData?.items ?? []
   const records = recordsData?.items ?? []
@@ -251,7 +252,7 @@ export function PerformedList({ patientId }: PerformedListProps) {
                     <SelectItem value="none">Bez povezanog nalaza</SelectItem>
                     {records.map((r) => (
                       <SelectItem key={r.id} value={r.id}>
-                        {formatDateHR(r.datum)} — {RECORD_TIP[r.tip] || r.tip}
+                        {formatDateHR(r.datum)} — {tipLabelMap[r.tip] || r.tip}
                         {r.dijagnoza_mkb ? ` (${r.dijagnoza_mkb})` : ""}
                       </SelectItem>
                     ))}

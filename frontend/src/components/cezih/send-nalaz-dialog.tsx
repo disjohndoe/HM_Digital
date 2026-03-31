@@ -27,11 +27,7 @@ import {
 import { MockBadge } from "@/components/cezih/mock-badge"
 import { useMedicalRecords } from "@/lib/hooks/use-medical-records"
 import { useSendENalaz } from "@/lib/hooks/use-cezih"
-import {
-  CEZIH_MANDATORY_TYPES,
-  RECORD_TIP,
-  RECORD_TIP_COLORS,
-} from "@/lib/constants"
+import { useRecordTypeMaps } from "@/lib/hooks/use-record-types"
 import { formatDateHR } from "@/lib/utils"
 
 interface SendNalazDialogProps {
@@ -47,10 +43,11 @@ export function SendNalazDialog({ open, onOpenChange, patientId }: SendNalazDial
 
   const { data } = useMedicalRecords(patientId)
   const sendENalaz = useSendENalaz()
+  const { tipLabelMap, tipColorMap, isCezihMandatory } = useRecordTypeMaps()
 
   const records = data?.items ?? []
   const eligibleRecords = records.filter(
-    (r) => CEZIH_MANDATORY_TYPES.has(r.tip) && !r.cezih_sent
+    (r) => isCezihMandatory.has(r.tip) && !r.cezih_sent
   )
 
   // Pre-select all eligible records when dialog opens or records change
@@ -163,9 +160,9 @@ export function SendNalazDialog({ open, onOpenChange, patientId }: SendNalazDial
                       <CheckIcon checked={selectedIds.has(r.id)} />
                       <Badge
                         variant="secondary"
-                        className={`text-xs ${RECORD_TIP_COLORS[r.tip] || ""}`}
+                        className={`text-xs ${tipColorMap[r.tip] || ""}`}
                       >
-                        {RECORD_TIP[r.tip] || r.tip}
+                        {tipLabelMap[r.tip] || r.tip}
                       </Badge>
                       <span className="ml-auto text-xs text-muted-foreground">
                         {formatDateHR(r.datum)}

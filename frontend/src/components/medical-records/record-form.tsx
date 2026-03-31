@@ -17,7 +17,7 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover"
-import { RECORD_TIP_OPTIONS, CEZIH_MANDATORY_TYPES } from "@/lib/constants"
+import { useRecordTypes } from "@/lib/hooks/use-record-types"
 import {
   useCreateMedicalRecord,
   useUpdateMedicalRecord,
@@ -59,6 +59,7 @@ export function RecordForm({ open, onOpenChange, patientId, record }: RecordForm
   const [drugSearchQuery, setDrugSearchQuery] = useState("")
   const [therapy, setTherapy] = useState<PreporucenaTerapijaEntry[]>([])
   const { data: drugs } = useDrugSearch(drugSearchQuery)
+  const { data: recordTypes } = useRecordTypes()
 
   const {
     register,
@@ -253,16 +254,16 @@ export function RecordForm({ open, onOpenChange, patientId, record }: RecordForm
               >
                 <option value="" disabled>Odaberite tip</option>
                 <optgroup label="CEZIH obavezni">
-                  {RECORD_TIP_OPTIONS.filter((opt) => CEZIH_MANDATORY_TYPES.has(opt.value)).map((opt) => (
-                    <option key={opt.value} value={opt.value}>
-                      {opt.label}
+                  {(recordTypes ?? []).filter((t) => t.is_cezih_mandatory).map((t) => (
+                    <option key={t.slug} value={t.slug}>
+                      {t.label}
                     </option>
                   ))}
                 </optgroup>
                 <optgroup label="Ostali tipovi">
-                  {RECORD_TIP_OPTIONS.filter((opt) => !CEZIH_MANDATORY_TYPES.has(opt.value)).map((opt) => (
-                    <option key={opt.value} value={opt.value}>
-                      {opt.label}
+                  {(recordTypes ?? []).filter((t) => !t.is_cezih_mandatory).map((t) => (
+                    <option key={t.slug} value={t.slug}>
+                      {t.label}
                     </option>
                   ))}
                 </optgroup>

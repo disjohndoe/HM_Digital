@@ -22,7 +22,8 @@ import { PrescriptionForm } from "@/components/prescriptions/prescription-form"
 import { CaseManagement } from "@/components/cezih/case-management"
 import { usePatientCezihSummary, useInsuranceCheck, useCancelDocument, useReplaceDocument } from "@/lib/hooks/use-cezih"
 import { usePermissions } from "@/lib/hooks/use-permissions"
-import { OSIGURANJE_STATUS, RECORD_TIP } from "@/lib/constants"
+import { OSIGURANJE_STATUS } from "@/lib/constants"
+import { useRecordTypeMaps } from "@/lib/hooks/use-record-types"
 import { formatDateTimeHR } from "@/lib/utils"
 
 interface PatientCezihTabProps {
@@ -36,6 +37,7 @@ export function PatientCezihTab({ patientId, patientMbo }: PatientCezihTabProps)
   const cancelDocument = useCancelDocument()
   const replaceDocument = useReplaceDocument()
   const { canUseHzzo } = usePermissions()
+  const { tipLabelMap } = useRecordTypeMaps()
   const [eReceptOpen, setEReceptOpen] = useState(false)
   const [nalazStornoTarget, setNalazStornoTarget] = useState<string | null>(null)
   const [nalazReplaceTarget, setNalazReplaceTarget] = useState<string | null>(null)
@@ -172,7 +174,7 @@ export function PatientCezihTab({ patientId, patientMbo }: PatientCezihTabProps)
                     <TableCell className="text-sm">{formatDateTimeHR(item.datum)}</TableCell>
                     <TableCell>
                       <Badge variant="outline" className="text-xs">
-                        {RECORD_TIP[item.tip] || item.tip}
+                        {tipLabelMap[item.tip] || item.tip}
                       </Badge>
                     </TableCell>
                     <TableCell className="hidden sm:table-cell font-mono text-xs">

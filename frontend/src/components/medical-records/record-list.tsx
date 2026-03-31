@@ -24,8 +24,9 @@ import { LoadingSpinner } from "@/components/shared/loading-spinner"
 import { RecordForm } from "./record-form"
 import { RecordDetail } from "./record-detail"
 import { useMedicalRecords } from "@/lib/hooks/use-medical-records"
+import { useRecordTypeMaps } from "@/lib/hooks/use-record-types"
 import { usePermissions } from "@/lib/hooks/use-permissions"
-import { RECORD_TIP, RECORD_TIP_OPTIONS, RECORD_TIP_COLORS, RECORD_SENSITIVITY, RECORD_SENSITIVITY_COLORS, CEZIH_MANDATORY_TYPES } from "@/lib/constants"
+import { RECORD_SENSITIVITY, RECORD_SENSITIVITY_COLORS } from "@/lib/constants"
 import { formatDateHR } from "@/lib/utils"
 import type { MedicalRecord } from "@/lib/types"
 
@@ -40,6 +41,7 @@ export function RecordList({ patientId }: RecordListProps) {
   const [editRecord, setEditRecord] = useState<MedicalRecord | null>(null)
 
   const { canCreateMedicalRecord, canEditMedicalRecord } = usePermissions()
+  const { recordTypes, tipLabelMap, tipColorMap, isCezihMandatory } = useRecordTypeMaps()
   const { data, isLoading } = useMedicalRecords(
     patientId,
     tipFilter || undefined,
@@ -64,9 +66,9 @@ export function RecordList({ patientId }: RecordListProps) {
             <SelectValue placeholder="Svi tipovi" />
           </SelectTrigger>
           <SelectContent>
-            {RECORD_TIP_OPTIONS.map((opt) => (
-              <SelectItem key={opt.value} value={opt.value}>
-                {opt.label}
+            {recordTypes.map((rt) => (
+              <SelectItem key={rt.slug} value={rt.slug}>
+                {rt.label}
               </SelectItem>
             ))}
           </SelectContent>
@@ -103,11 +105,11 @@ export function RecordList({ patientId }: RecordListProps) {
                   <div className="flex items-center gap-1">
                     <Badge
                       variant="secondary"
-                      className={RECORD_TIP_COLORS[r.tip] || ""}
+                      className={tipColorMap[r.tip] || ""}
                     >
-                      {RECORD_TIP[r.tip] || r.tip}
+                      {tipLabelMap[r.tip] || r.tip}
                     </Badge>
-                    {CEZIH_MANDATORY_TYPES.has(r.tip) && (
+                    {isCezihMandatory.has(r.tip) && (
                       <span className="text-[10px] font-medium text-emerald-600" title="Obavezno za CEZIH">CEZIH</span>
                     )}
                   </div>

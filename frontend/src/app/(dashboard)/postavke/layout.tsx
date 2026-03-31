@@ -10,7 +10,7 @@ const settingsTabs = [
   { href: "/postavke/klinika", label: "Klinika" },
   { href: "/postavke/korisnici", label: "Korisnici" },
   { href: "/postavke/sesije", label: "Sesije" },
-  { href: "/postavke/cezih", label: "CEZIH" },
+  { href: "/postavke/tipovi-zapisa", label: "Tip nalaza" },
 ];
 
 export default function PostavkeLayout({ children }: { children: React.ReactNode }) {

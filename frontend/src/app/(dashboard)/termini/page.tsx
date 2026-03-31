@@ -162,7 +162,17 @@ export default function TerminiPage() {
 
         <div className="ml-auto flex items-center gap-2">
           {doctors.length > 1 && (
-            <Select value={doktorId} onValueChange={(v) => setDoktorId(v ?? "")}>
+            <Select
+              value={doktorId}
+              onValueChange={(v) => setDoktorId(v ?? "")}
+              items={[
+                { value: "", label: "Svi doktori" },
+                ...doctors.map((d) => ({
+                  value: d.id,
+                  label: `${d.prezime} ${d.ime}`,
+                })),
+              ]}
+            >
               <SelectTrigger className="w-[200px]">
                 <SelectValue placeholder="Svi doktori" />
               </SelectTrigger>
