@@ -3,7 +3,6 @@
 import { useMemo } from "react"
 import { cn } from "@/lib/utils"
 import { useAppointments } from "@/lib/hooks/use-appointments"
-import type { Appointment } from "@/lib/types"
 
 interface YearViewProps {
   selectedDate: Date

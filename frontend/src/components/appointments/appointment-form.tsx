@@ -249,8 +249,9 @@ export function AppointmentForm({
           <div className="space-y-2">
             <Label>Doktor *</Label>
             <Select
-              value={watch("doktor_id") || undefined}
+              value={watch("doktor_id") ?? ""}
               onValueChange={(v) => setValue("doktor_id", v ?? "")}
+              disabled={doctors.length <= 1}
             >
               <SelectTrigger>
                 <SelectValue placeholder="Odaberite doktora">
@@ -277,7 +278,7 @@ export function AppointmentForm({
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-2">
               <Label htmlFor="datum">Datum *</Label>
-              <Input id="datum" type="date" {...register("datum")} />
+              <Input id="datum" type="date" lang="hr" {...register("datum")} />
               {errors.datum && (
                 <p className="text-sm text-destructive">{errors.datum.message}</p>
               )}

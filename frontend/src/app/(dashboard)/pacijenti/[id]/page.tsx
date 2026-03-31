@@ -16,6 +16,7 @@ import { RecordList } from "@/components/medical-records/record-list"
 import { DocumentList } from "@/components/documents/document-list"
 import { UploadDialog } from "@/components/documents/upload-dialog"
 import { PatientCezihTab } from "@/components/cezih/patient-cezih-tab"
+import { PrescriptionList } from "@/components/prescriptions/prescription-list"
 import { usePatient } from "@/lib/hooks/use-patients"
 import { usePermissions } from "@/lib/hooks/use-permissions"
 import { formatDateHR, formatDateTimeHR } from "@/lib/utils"
@@ -25,7 +26,7 @@ export default function PacijentDetailPage() {
   const id = params.id as string
   const { data: patient, isLoading, error } = usePatient(id)
   const [uploadOpen, setUploadOpen] = useState(false)
-  const { canViewMedicalRecords, canViewCezih, canViewDocuments, canUploadDocuments, canEditMedicalRecord } = usePermissions()
+  const { canViewMedicalRecords, canViewCezih, canViewDocuments, canUploadDocuments, canEditMedicalRecord, canPerformCezihOps } = usePermissions()
 
   if (isLoading) {
     return (
@@ -65,6 +66,7 @@ export default function PacijentDetailPage() {
           <TabsTrigger value="pregled">Pregled</TabsTrigger>
           <TabsTrigger value="postupci">Postupci</TabsTrigger>
           {canViewMedicalRecords && <TabsTrigger value="nalazi">Nalazi</TabsTrigger>}
+          {canPerformCezihOps && <TabsTrigger value="recepti">Recepti</TabsTrigger>}
           {canViewDocuments && <TabsTrigger value="dokumenti">Dokumenti</TabsTrigger>}
           {canViewCezih && <TabsTrigger value="cezih">CEZIH</TabsTrigger>}
         </TabsList>
@@ -181,6 +183,12 @@ export default function PacijentDetailPage() {
         {canViewMedicalRecords && (
           <TabsContent value="nalazi">
             <RecordList patientId={id} />
+          </TabsContent>
+        )}
+
+        {canPerformCezihOps && (
+          <TabsContent value="recepti">
+            <PrescriptionList patientId={id} />
           </TabsContent>
         )}
 

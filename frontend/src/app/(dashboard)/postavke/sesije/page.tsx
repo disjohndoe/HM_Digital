@@ -107,20 +107,20 @@ export default function SesijePage() {
             <div className="flex items-center justify-between text-sm">
               <span className="text-muted-foreground">Aktivne sesije</span>
               <span className="font-medium">
-                {usage.sessions.current} / {usage.sessions.max}
+                {sessions?.length ?? usage.sessions.current} / {usage.sessions.max}
               </span>
             </div>
             <div className="mt-2 h-2 rounded-full bg-muted overflow-hidden">
               <div
                 className={`h-full rounded-full transition-all ${
-                  usage.sessions.current >= usage.sessions.max
+                  (sessions?.length ?? usage.sessions.current) >= usage.sessions.max
                     ? "bg-destructive"
                     : "bg-primary"
                 }`}
                 style={{
                   width: `${Math.min(
                     100,
-                    (usage.sessions.current / usage.sessions.max) * 100
+                    ((sessions?.length ?? usage.sessions.current) / usage.sessions.max) * 100
                   )}%`,
                 }}
               />
