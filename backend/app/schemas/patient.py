@@ -85,20 +85,6 @@ class PatientUpdate(BaseModel):
     alergije: str | None = None
     is_active: bool | None = None
 
-    @field_validator("oib")
-    @classmethod
-    def validate_oib_field(cls, v: str | None) -> str | None:
-        if v is not None and not validate_oib(v):
-            raise ValueError("Neispravan OIB")
-        return v
-
-    @field_validator("mbo")
-    @classmethod
-    def validate_mbo_field(cls, v: str | None) -> str | None:
-        if v is not None and not validate_mbo(v):
-            raise ValueError("Neispravan MBO")
-        return v
-
     @field_validator("spol")
     @classmethod
     def validate_spol(cls, v: str | None) -> str | None:

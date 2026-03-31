@@ -22,6 +22,7 @@ class TenantRead(BaseModel):
     trial_expires_at: datetime | None
     is_active: bool
     cezih_status: str
+    has_hzzo_contract: bool
 
     model_config = {"from_attributes": True}
 
@@ -39,3 +40,4 @@ class TenantUpdate(BaseModel):
     web: str | None = None
     sifra_ustanove: str | None = None
     oid: str | None = None
+    has_hzzo_contract: bool | None = None

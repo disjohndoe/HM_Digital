@@ -2,10 +2,12 @@ import uuid
 
 from fastapi import HTTPException, status
 from sqlalchemy import func, or_, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.patient import Patient
 from app.schemas.patient import PatientCreate, PatientUpdate
+from app.utils.croatian import validate_mbo, validate_oib
 
 
 async def list_patients(
@@ -90,7 +92,23 @@ async def create_patient(
 
     patient = Patient(tenant_id=tenant_id, **data.model_dump())
     db.add(patient)
-    await db.flush()
+    try:
+        await db.flush()
+    except IntegrityError as e:
+        await db.rollback()
+        error_msg = str(e.orig)
+        if "uq_patient_tenant_oib" in error_msg:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Pacijent s tim OIB-om vec postoji",
+            )
+        elif "uq_patient_tenant_mbo" in error_msg:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Pacijent s tim MBO-om vec postoji",
+            )
+        raise
+    await db.refresh(patient)
     return patient
 
 
@@ -103,6 +121,20 @@ async def update_patient(
     patient = await get_patient(db, tenant_id, patient_id)
 
     update_data = data.model_dump(exclude_unset=True)
+
+    # Validate OIB/MBO only when actually changing the value
+    new_oib = update_data.get("oib")
+    if new_oib and new_oib != patient.oib and not validate_oib(new_oib):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Neispravan OIB",
+        )
+    new_mbo = update_data.get("mbo")
+    if new_mbo and new_mbo != patient.mbo and not validate_mbo(new_mbo):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Neispravan MBO",
+        )
 
     if "oib" in update_data and update_data["oib"]:
         existing = await db.execute(
@@ -138,6 +170,7 @@ async def update_patient(
         setattr(patient, field, value)
 
     await db.flush()
+    await db.refresh(patient)
     return patient
 
 

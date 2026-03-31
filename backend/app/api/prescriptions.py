@@ -3,7 +3,7 @@ import uuid
 from fastapi import APIRouter, Depends, Query, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.plan_enforcement import check_cezih_access
+from app.core.plan_enforcement import check_cezih_access, check_hzzo_access
 from app.database import get_db
 from app.dependencies import get_current_user, require_roles
 from app.models.user import User
@@ -76,6 +76,7 @@ async def send_prescription(
     db: AsyncSession = Depends(get_db),
 ):
     await check_cezih_access(db, current_user.tenant_id)
+    await check_hzzo_access(db, current_user.tenant_id)
     return await prescription_service.send_to_cezih(
         db, current_user.tenant_id, prescription_id,
         user_id=current_user.id, http_client=_http_client(request),
@@ -90,6 +91,7 @@ async def storno_prescription(
     db: AsyncSession = Depends(get_db),
 ):
     await check_cezih_access(db, current_user.tenant_id)
+    await check_hzzo_access(db, current_user.tenant_id)
     return await prescription_service.storno_prescription(
         db, current_user.tenant_id, prescription_id,
         user_id=current_user.id, http_client=_http_client(request),

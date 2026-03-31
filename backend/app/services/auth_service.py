@@ -5,7 +5,7 @@ from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
 
 from fastapi import HTTPException, status
-from sqlalchemy import delete, func, select, text
+from sqlalchemy import delete, func, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
@@ -98,6 +98,15 @@ async def login(db: AsyncSession, email: str, password: str) -> TokenResponse:
     # Session limit enforcement
     limits = get_plan_limits(tenant.plan_tier)
     now = datetime.now(UTC)
+
+    # Auto-cleanup expired/revoked tokens for this tenant
+    tenant_user_ids = select(User.id).where(User.tenant_id == tenant.id)
+    await db.execute(
+        delete(RefreshToken).where(
+            RefreshToken.user_id.in_(tenant_user_ids),
+            or_(RefreshToken.is_revoked.is_(True), RefreshToken.expires_at <= now),
+        )
+    )
 
     # Admin sessions don't count toward the limit — only non-admin users
     non_admin_user_ids = select(User.id).where(

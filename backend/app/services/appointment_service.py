@@ -172,12 +172,15 @@ async def update_appointment(
     tenant_id: uuid.UUID,
     appointment_id: uuid.UUID,
     data: AppointmentUpdate,
+    user_id: uuid.UUID | None = None,
+    http_client=None,
 ) -> dict:
     appointment = await db.get(Appointment, appointment_id)
     if not appointment or appointment.tenant_id != tenant_id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Termin nije pronadjen")
 
     update_data = data.model_dump(exclude_unset=True)
+    old_status = appointment.status
 
     # If rescheduling, check conflict
     if "datum_vrijeme" in update_data or "doktor_id" in update_data or "trajanje_minuta" in update_data:

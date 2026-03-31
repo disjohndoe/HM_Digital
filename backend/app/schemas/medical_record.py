@@ -3,6 +3,17 @@ from uuid import UUID
 
 from pydantic import BaseModel, field_validator
 
+from app.constants import RECORD_TIP_ALLOWED
+
+
+class PreporucenaTerapijaEntry(BaseModel):
+    atk: str = ""
+    naziv: str
+    jacina: str = ""
+    oblik: str = ""
+    doziranje: str = ""
+    napomena: str = ""
+
 
 class MedicalRecordCreate(BaseModel):
     patient_id: UUID
@@ -13,6 +24,15 @@ class MedicalRecordCreate(BaseModel):
     dijagnoza_tekst: str | None = None
     sadrzaj: str
     sensitivity: str = "standard"
+    preporucena_terapija: list[PreporucenaTerapijaEntry] | None = None
+
+    @field_validator("tip")
+    @classmethod
+    def validate_tip(cls, v: str) -> str:
+        if v not in RECORD_TIP_ALLOWED:
+            allowed = ", ".join(sorted(RECORD_TIP_ALLOWED))
+            raise ValueError(f"Nepoznat tip zapisa '{v}'. Dozvoljeni: {allowed}")
+        return v
 
     @field_validator("sadrzaj")
     @classmethod
@@ -44,8 +64,11 @@ class MedicalRecordRead(BaseModel):
     cezih_reference_id: str | None
     cezih_storno: bool
     sensitivity: str
+    preporucena_terapija: list[PreporucenaTerapijaEntry] | None = None
     doktor_ime: str | None = None
     doktor_prezime: str | None = None
+    patient_ime: str | None = None
+    patient_prezime: str | None = None
     tenant_id: UUID
     created_at: datetime
     updated_at: datetime
@@ -61,6 +84,15 @@ class MedicalRecordUpdate(BaseModel):
     dijagnoza_tekst: str | None = None
     sadrzaj: str | None = None
     sensitivity: str | None = None
+    preporucena_terapija: list[PreporucenaTerapijaEntry] | None = None
+
+    @field_validator("tip")
+    @classmethod
+    def validate_tip(cls, v: str | None) -> str | None:
+        if v is not None and v not in RECORD_TIP_ALLOWED:
+            allowed = ", ".join(sorted(RECORD_TIP_ALLOWED))
+            raise ValueError(f"Nepoznat tip zapisa '{v}'. Dozvoljeni: {allowed}")
+        return v
 
     @field_validator("sadrzaj")
     @classmethod

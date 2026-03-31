@@ -6,6 +6,7 @@ from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.medical_record import MedicalRecord
+from app.models.patient import Patient
 from app.models.user import User
 from app.schemas.medical_record import MedicalRecordCreate, MedicalRecordUpdate
 
@@ -13,9 +14,12 @@ from app.schemas.medical_record import MedicalRecordCreate, MedicalRecordUpdate
 def _join_record_query(base):
     return (
         base.outerjoin(User, MedicalRecord.doktor_id == User.id)
+        .outerjoin(Patient, MedicalRecord.patient_id == Patient.id)
         .add_columns(
             User.ime.label("doktor_ime"),
             User.prezime.label("doktor_prezime"),
+            Patient.ime.label("patient_ime"),
+            Patient.prezime.label("patient_prezime"),
         )
     )
 
@@ -38,8 +42,11 @@ def _record_row_to_dict(row) -> dict:
         "cezih_reference_id": rec.cezih_reference_id,
         "cezih_storno": rec.cezih_storno,
         "sensitivity": rec.sensitivity,
+        "preporucena_terapija": rec.preporucena_terapija,
         "doktor_ime": row.doktor_ime,
         "doktor_prezime": row.doktor_prezime,
+        "patient_ime": row.patient_ime,
+        "patient_prezime": row.patient_prezime,
         "created_at": rec.created_at,
         "updated_at": rec.updated_at,
     }
@@ -52,6 +59,7 @@ async def list_records(
     tip: str | None = None,
     date_from: date | None = None,
     date_to: date | None = None,
+    cezih_sent: bool | None = None,
     skip: int = 0,
     limit: int = 20,
     user_role: str | None = None,
@@ -66,6 +74,8 @@ async def list_records(
         conditions.append(MedicalRecord.datum >= date_from)
     if date_to:
         conditions.append(MedicalRecord.datum <= date_to)
+    if cezih_sent is not None:
+        conditions.append(MedicalRecord.cezih_sent == cezih_sent)
 
     # Nurse sensitivity filter
     if user_role == "nurse":
@@ -123,6 +133,7 @@ async def create_record(
         dijagnoza_tekst=data.dijagnoza_tekst,
         sadrzaj=data.sadrzaj,
         sensitivity=data.sensitivity,
+        preporucena_terapija=[t.model_dump() for t in data.preporucena_terapija] if data.preporucena_terapija else None,
     )
     db.add(record)
     await db.flush()

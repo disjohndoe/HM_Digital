@@ -1,7 +1,7 @@
 import uuid
 from datetime import date, datetime
 
-from sqlalchemy import Boolean, CheckConstraint, Date, DateTime, ForeignKey, Index, String, Text
+from sqlalchemy import Boolean, CheckConstraint, Date, DateTime, ForeignKey, Index, JSON, String, Text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -31,3 +31,4 @@ class MedicalRecord(BaseTenantModel):
     cezih_reference_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
     cezih_storno: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
     sensitivity: Mapped[str] = mapped_column(String(20), nullable=False, server_default="standard")
+    preporucena_terapija: Mapped[list | None] = mapped_column(JSON, nullable=True)

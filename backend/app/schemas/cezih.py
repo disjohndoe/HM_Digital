@@ -22,7 +22,6 @@ class InsuranceCheckResponse(BaseModel):
 class ENalazRequest(BaseModel):
     patient_id: UUID
     record_id: UUID
-    uputnica_id: str | None = None
 
 
 class ENalazResponse(BaseModel):
@@ -30,21 +29,6 @@ class ENalazResponse(BaseModel):
     success: bool
     reference_id: str
     sent_at: datetime
-
-
-class EUputnicaItem(BaseModel):
-    mock: bool = True
-    id: str
-    datum_izdavanja: str
-    izdavatelj: str
-    svrha: str
-    specijalist: str
-    status: str
-
-
-class EUputniceResponse(BaseModel):
-    mock: bool = True
-    items: list[EUputnicaItem]
 
 
 class EReceptLijekEntry(BaseModel):
@@ -79,6 +63,11 @@ class CezihStatusResponse(BaseModel):
     mode: str
     agent_connected: bool
     last_heartbeat: datetime | None
+    # TODO: When AKD smart card auth is live, populate from card identity
+    # instead of current logged-in user. The local agent should send the
+    # authenticated practitioner name + clinic after VPN+card handshake.
+    connected_doctor: str | None = None
+    connected_clinic: str | None = None
 
 
 # --- Feature 1: Activity Log ---
@@ -136,7 +125,7 @@ class PatientCezihSummary(BaseModel):
 class CezihDashboardStats(BaseModel):
     mock: bool = True
     danas_operacije: int = 0
-    otvorene_uputnice: int = 2
+    neposlani_nalazi: int = 0
     zadnja_operacija: datetime | None = None
 
 
@@ -239,43 +228,7 @@ class ForeignerRegistrationResponse(BaseModel):
     success: bool
     patient_id: str
     mbo: str
-
-
-# ============================================================
-# TC12-14: Visit Management
-# ============================================================
-
-
-class CreateVisitRequest(BaseModel):
-    patient_id: UUID
-    patient_mbo: str
-    period_start: str
-    admission_type_code: str = "9"
-
-
-class VisitResponse(BaseModel):
-    mock: bool = True
-    success: bool
-    visit_id: str
-    status: str = "in-progress"
-    created_at: str | None = None
-
-
-class UpdateVisitRequest(BaseModel):
-    period_start: str | None = None
-    admission_type_code: str | None = None
-
-
-class CloseVisitRequest(BaseModel):
-    period_end: str
-    diagnosis_case_id: str | None = None
-
-
-class VisitActionResponse(BaseModel):
-    mock: bool = True
-    success: bool
-    visit_id: str | None = None
-    status: str | None = None
+    local_patient_id: UUID | None = None
 
 
 # ============================================================

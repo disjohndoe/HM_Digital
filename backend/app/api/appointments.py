@@ -1,7 +1,7 @@
 import uuid
 from datetime import date
 
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Depends, Query, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
@@ -81,12 +81,17 @@ async def get_appointment(
 
 @router.patch("/{appointment_id}", response_model=AppointmentRead)
 async def update_appointment(
+    request: Request,
     appointment_id: uuid.UUID,
     data: AppointmentUpdate,
     current_user: User = Depends(require_roles("admin", "doctor", "nurse", "receptionist")),
     db: AsyncSession = Depends(get_db),
 ):
-    return await appointment_service.update_appointment(db, current_user.tenant_id, appointment_id, data)
+    return await appointment_service.update_appointment(
+        db, current_user.tenant_id, appointment_id, data,
+        user_id=current_user.id,
+        http_client=getattr(request.app.state, "http_client", None),
+    )
 
 
 @router.delete("/{appointment_id}", status_code=status.HTTP_204_NO_CONTENT)

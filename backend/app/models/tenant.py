@@ -40,3 +40,4 @@ class Tenant(Base, TimestampMixin):
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="true")
     cezih_status: Mapped[str] = mapped_column(String(20), nullable=False, server_default="nepovezano")
     agent_secret: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    has_hzzo_contract: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")

@@ -1,5 +1,5 @@
 import json  # noqa: F401
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query, Request
@@ -7,12 +7,13 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
-from app.core.plan_enforcement import check_cezih_access
+from app.constants import CEZIH_MANDATORY_TYPES
+from app.core.plan_enforcement import check_cezih_access, check_hzzo_access
 from app.database import get_db
 from app.dependencies import get_current_user, require_roles
 from app.models.audit_log import AuditLog
-from app.models.cezih_euputnica import CezihEUputnica
 from app.models.medical_record import MedicalRecord
+from app.models.tenant import Tenant
 from app.models.user import User
 from app.schemas.cezih import (
     CaseActionResponse,
@@ -23,10 +24,8 @@ from app.schemas.cezih import (
     CezihActivityListResponse,
     CezihDashboardStats,
     CezihStatusResponse,
-    CloseVisitRequest,
     CodeSystemItem,
     CreateCaseRequest,
-    CreateVisitRequest,
     DocumentActionResponse,
     DocumentSearchItem,
     ENalazRequest,
@@ -34,7 +33,6 @@ from app.schemas.cezih import (
     EReceptRequest,
     EReceptResponse,
     EReceptStornoResponse,
-    EUputniceResponse,
     ForeignerRegistrationRequest,
     ForeignerRegistrationResponse,
     InsuranceCheckRequest,
@@ -51,10 +49,7 @@ from app.schemas.cezih import (
     ReplaceDocumentRequest,
     UpdateCaseDataRequest,
     UpdateCaseStatusRequest,
-    UpdateVisitRequest,
     ValueSetExpandResponse,
-    VisitActionResponse,
-    VisitResponse,
 )
 from app.services.cezih import dispatcher as cezih
 
@@ -69,8 +64,19 @@ def _http_client(request: Request):
 async def get_cezih_status(
     request: Request,
     current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
 ):
-    return await cezih.cezih_status(current_user.tenant_id, http_client=_http_client(request))
+    result = await cezih.cezih_status(current_user.tenant_id, http_client=_http_client(request))
+    # TODO: When AKD smart card is connected via local agent, replace these
+    # with the identity from the card (practitioner name from certificate +
+    # clinic from CEZIH OID registry). The local agent should send this info
+    # after successful VPN + card authentication.
+    tenant = await db.get(Tenant, current_user.tenant_id)
+    titula = current_user.titula or ""
+    doctor_name = f"{titula} {current_user.ime} {current_user.prezime}".strip()
+    result["connected_doctor"] = doctor_name
+    result["connected_clinic"] = tenant.naziv if tenant else None
+    return result
 
 
 @router.post("/provjera-osiguranja", response_model=InsuranceCheckResponse)
@@ -98,29 +104,7 @@ async def send_enalaz(
     await check_cezih_access(db, current_user.tenant_id)
     return await cezih.send_enalaz(
         db, current_user.tenant_id, data.patient_id, data.record_id,
-        user_id=current_user.id, uputnica_id=data.uputnica_id,
-        http_client=_http_client(request),
-    )
-
-
-@router.get("/e-uputnice", response_model=EUputniceResponse)
-async def list_euputnice(
-    current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
-):
-    """Return all persisted e-Uputnice for the tenant."""
-    return await cezih.get_stored_euputnice(db=db, tenant_id=current_user.tenant_id)
-
-
-@router.post("/e-uputnica/preuzmi", response_model=EUputniceResponse)
-async def retrieve_euputnice(
-    request: Request,
-    current_user: User = Depends(require_roles("admin", "doctor", "nurse")),
-    db: AsyncSession = Depends(get_db),
-):
-    await check_cezih_access(db, current_user.tenant_id)
-    return await cezih.retrieve_euputnice(
-        db=db, user_id=current_user.id, tenant_id=current_user.tenant_id,
+        user_id=current_user.id,
         http_client=_http_client(request),
     )
 
@@ -133,6 +117,7 @@ async def send_erecept(
     db: AsyncSession = Depends(get_db),
 ):
     await check_cezih_access(db, current_user.tenant_id)
+    await check_hzzo_access(db, current_user.tenant_id)
     lijekovi_dicts = [item.model_dump() for item in data.lijekovi]
     return await cezih.send_erecept(
         data.patient_id, lijekovi_dicts,
@@ -149,6 +134,7 @@ async def cancel_erecept(
     db: AsyncSession = Depends(get_db),
 ):
     await check_cezih_access(db, current_user.tenant_id)
+    await check_hzzo_access(db, current_user.tenant_id)
     return await cezih.cancel_erecept(
         recept_id,
         db=db, user_id=current_user.id, tenant_id=current_user.tenant_id,
@@ -302,18 +288,20 @@ async def get_cezih_dashboard_stats(
     )
     last_op = last_result.scalar_one_or_none()
 
-    # Open referrals count from persisted data
-    open_result = await db.execute(
+    # Unsent mandatory CEZIH nalazi count
+    unsent_result = await db.execute(
         select(func.count()).where(
-            CezihEUputnica.tenant_id == current_user.tenant_id,
-            CezihEUputnica.status == "Otvorena",
+            MedicalRecord.tenant_id == current_user.tenant_id,
+            MedicalRecord.tip.in_(CEZIH_MANDATORY_TYPES),
+            MedicalRecord.cezih_sent == False,  # noqa: E712
+            MedicalRecord.cezih_storno == False,  # noqa: E712
         )
     )
-    open_count = open_result.scalar() or 0
+    unsent_count = unsent_result.scalar() or 0
 
     return CezihDashboardStats(
         danas_operacije=danas,
-        otvorene_uputnice=open_count,
+        neposlani_nalazi=unsent_count,
         zadnja_operacija=last_op,
     )
 
@@ -326,7 +314,18 @@ async def search_drugs(
     q: str = Query("", min_length=0),
     current_user: User = Depends(get_current_user),
 ):
-    return cezih.drug_search(q)
+    return await cezih.drug_search(q)
+
+
+@router.post("/lijekovi/sync")
+async def trigger_drug_sync(
+    current_user: User = Depends(require_roles("admin")),
+):
+    """Manually trigger HZZO drug list sync (admin only)."""
+    from app.services.halmed_sync_service import sync_hzzo_drugs
+
+    result = await sync_hzzo_drugs()
+    return result
 
 
 # ============================================================
@@ -435,105 +434,33 @@ async def register_foreigner(
     current_user: User = Depends(require_roles("admin", "doctor")),
     db: AsyncSession = Depends(get_db),
 ):
+    from app.models.patient import Patient
+
     await check_cezih_access(db, current_user.tenant_id)
-    return await cezih.foreigner_registration(
+    result = await cezih.foreigner_registration(
         data.model_dump(),
         db=db, user_id=current_user.id, tenant_id=current_user.tenant_id,
         http_client=_http_client(request),
     )
 
+    if result.get("success"):
+        spol_map = {"male": "M", "female": "Z"}
+        dob = date.fromisoformat(data.datum_rodjenja) if data.datum_rodjenja else None
+        patient = Patient(
+            tenant_id=current_user.tenant_id,
+            ime=data.ime,
+            prezime=data.prezime,
+            datum_rodjenja=dob,
+            spol=spol_map.get(data.spol),
+            mbo=result.get("mbo"),
+            napomena="Registriran putem CEZIH PMIR",
+        )
+        db.add(patient)
+        await db.flush()
+        await db.refresh(patient)
+        result["local_patient_id"] = str(patient.id)
 
-# ============================================================
-# TC12-14: Visit Management
-# ============================================================
-
-
-@router.post("/visits", response_model=VisitResponse)
-async def create_visit(
-    request: Request,
-    data: CreateVisitRequest,
-    current_user: User = Depends(require_roles("admin", "doctor")),
-    db: AsyncSession = Depends(get_db),
-):
-    await check_cezih_access(db, current_user.tenant_id)
-    return await cezih.dispatch_create_visit(
-        data.patient_mbo, current_user.practitioner_id or "",
-        settings.CEZIH_ORG_CODE,
-        data.period_start, data.admission_type_code,
-        db=db, user_id=current_user.id, tenant_id=current_user.tenant_id,
-        http_client=_http_client(request),
-    )
-
-
-@router.put("/visits/{visit_id}", response_model=VisitActionResponse)
-async def update_visit(
-    request: Request,
-    visit_id: str,
-    data: UpdateVisitRequest,
-    current_user: User = Depends(require_roles("admin", "doctor")),
-    db: AsyncSession = Depends(get_db),
-):
-    await check_cezih_access(db, current_user.tenant_id)
-    updates = {k: v for k, v in data.model_dump().items() if v is not None}
-    return await cezih.dispatch_update_visit(
-        visit_id, current_user.practitioner_id or "",
-        settings.CEZIH_ORG_CODE,
-        db=db, user_id=current_user.id, tenant_id=current_user.tenant_id,
-        http_client=_http_client(request),
-        **updates,
-    )
-
-
-@router.post("/visits/{visit_id}/close", response_model=VisitActionResponse)
-async def close_visit(
-    request: Request,
-    visit_id: str,
-    data: CloseVisitRequest,
-    current_user: User = Depends(require_roles("admin", "doctor")),
-    db: AsyncSession = Depends(get_db),
-):
-    await check_cezih_access(db, current_user.tenant_id)
-    return await cezih.dispatch_close_visit(
-        visit_id, current_user.practitioner_id or "",
-        settings.CEZIH_ORG_CODE,
-        data.period_end, data.period_end,  # period_start not needed for close
-        diagnosis_case_id=data.diagnosis_case_id,
-        db=db, user_id=current_user.id, tenant_id=current_user.tenant_id,
-        http_client=_http_client(request),
-    )
-
-
-@router.post("/visits/{visit_id}/reopen", response_model=VisitActionResponse)
-async def reopen_visit(
-    request: Request,
-    visit_id: str,
-    current_user: User = Depends(require_roles("admin", "doctor")),
-    db: AsyncSession = Depends(get_db),
-):
-    await check_cezih_access(db, current_user.tenant_id)
-    return await cezih.dispatch_reopen_visit(
-        visit_id, current_user.practitioner_id or "",
-        settings.CEZIH_ORG_CODE,
-        db=db, user_id=current_user.id, tenant_id=current_user.tenant_id,
-        http_client=_http_client(request),
-    )
-
-
-@router.delete("/visits/{visit_id}", response_model=VisitActionResponse)
-async def cancel_visit(
-    request: Request,
-    visit_id: str,
-    current_user: User = Depends(require_roles("admin", "doctor")),
-    db: AsyncSession = Depends(get_db),
-):
-    await check_cezih_access(db, current_user.tenant_id)
-    return await cezih.dispatch_cancel_visit(
-        visit_id, current_user.practitioner_id or "",
-        settings.CEZIH_ORG_CODE,
-        period_start="",  # Server already has this
-        db=db, user_id=current_user.id, tenant_id=current_user.tenant_id,
-        http_client=_http_client(request),
-    )
+    return result
 
 
 # ============================================================

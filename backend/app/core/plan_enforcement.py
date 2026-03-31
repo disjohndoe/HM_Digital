@@ -70,6 +70,16 @@ async def check_cezih_access(db: AsyncSession, tenant_id) -> None:
         )
 
 
+async def check_hzzo_access(db: AsyncSession, tenant_id) -> None:
+    """Verify tenant has an HZZO contract. Required for e-Recept and e-Uputnica."""
+    tenant = await _get_tenant(db, tenant_id)
+    if not tenant.has_hzzo_contract:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Ova akcija zahtijeva ugovor s HZZO-om.",
+        )
+
+
 async def get_current_usage(db: AsyncSession, tenant_id) -> dict:
     tenant = await _get_tenant(db, tenant_id)
     limits = get_plan_limits(tenant.plan_tier)
