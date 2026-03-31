@@ -13,14 +13,10 @@ from app.services.cezih.message_builder import (
     build_condition_data_update,
     build_condition_delete,
     build_condition_status_update,
-    build_encounter_cancel,
-    build_encounter_close,
-    build_encounter_create,
-    build_encounter_reopen,
-    build_encounter_update,
     build_message_bundle,
     parse_message_response,
 )
+from app.constants import get_cezih_document_coding
 from app.services.cezih.models import (
     FHIRBundle,
     FHIRBundleEntry,
@@ -90,36 +86,77 @@ async def send_enalaz(
     client: httpx.AsyncClient,
     patient_data: dict,
     record_data: dict,
-    uputnica_id: str | None = None,
 ) -> dict:
     """Send clinical document / finding (ITI-65 MHD).
 
     POST /doc-mhd-svc/api/v1/iti-65-service
     """
+    import base64
+
     fhir_client = CezihFhirClient(client)
 
-    # Build DocumentReference for the finding
-    doc_ref = FHIRDocumentReference(
-        status="current",
-        type=FHIRCodeableConcept(
-            coding=[FHIRCoding(
-                system="http://fhir.cezih.hr/specifikacije/vrste-dokumenata",
-                code=record_data.get("tip", "nalaz"),
-                display=record_data.get("tip_display", "Nalaz"),
-            )]
-        ),
-        subject=FHIRReference(
-            reference=f"Patient/{patient_data.get('mbo', '')}",
-            display=f"{patient_data.get('ime', '')} {patient_data.get('prezime', '')}",
-        ),
-        date=datetime.now(UTC).isoformat(),
-    )
+    # Build clinical content text
+    content_parts: list[str] = []
+    if record_data.get("dijagnoza_mkb") or record_data.get("dijagnoza_tekst"):
+        dx_parts = []
+        if record_data.get("dijagnoza_mkb"):
+            dx_parts.append(record_data["dijagnoza_mkb"])
+        if record_data.get("dijagnoza_tekst"):
+            dx_parts.append(record_data["dijagnoza_tekst"])
+        content_parts.append("Dijagnoza: " + " — ".join(dx_parts))
+    if record_data.get("sadrzaj"):
+        content_parts.append(record_data["sadrzaj"])
+    therapy = record_data.get("preporucena_terapija")
+    if therapy:
+        content_parts.append("\nPreporučena terapija:")
+        for t in therapy:
+            line = f"- {t.get('naziv', '')}"
+            if t.get("jacina"):
+                line += f" {t['jacina']}"
+            if t.get("doziranje"):
+                line += f", {t['doziranje']}"
+            if t.get("napomena"):
+                line += f". {t['napomena']}"
+            content_parts.append(line)
+        content_parts.append("(Preporuka specijalista — obiteljski liječnik izdaje e-Recept s RS oznakom)")
+
+    clinical_text = "\n".join(content_parts)
+    clinical_b64 = base64.b64encode(clinical_text.encode("utf-8")).decode("ascii") if clinical_text else None
+
+    # Build DocumentReference — map tip to CEZIH LOINC code
+    coding = get_cezih_document_coding(record_data.get("tip", "nalaz"))
+    doc_ref_dict: dict = {
+        "resourceType": "DocumentReference",
+        "status": "current",
+        "type": {
+            "coding": [{
+                "system": coding["system"],
+                "code": coding["code"],
+                "display": coding["display"],
+            }]
+        },
+        "subject": {
+            "reference": f"Patient/{patient_data.get('mbo', '')}",
+            "display": f"{patient_data.get('ime', '')} {patient_data.get('prezime', '')}",
+        },
+        "date": datetime.now(UTC).isoformat(),
+    }
+
+    # Include clinical content as attachment (FHIR MHD content element)
+    if clinical_b64:
+        doc_ref_dict["content"] = [{
+            "attachment": {
+                "contentType": "text/plain",
+                "language": "hr-HR",
+                "data": clinical_b64,
+            }
+        }]
 
     # Wrap in a Bundle (ITI-65 expects a Bundle)
     bundle = FHIRBundle(
         type="document",
         timestamp=datetime.now(UTC).isoformat(),
-        entry=[FHIRBundleEntry(resource=doc_ref.model_dump(by_alias=True))],
+        entry=[FHIRBundleEntry(resource=doc_ref_dict)],
     )
 
     response = await fhir_client.post(
@@ -188,35 +225,6 @@ async def search_documents(
                 "specijalist": _extract_reference_display(doc_ref.get("context", {}).get("encounter", {})),
                 "status": _map_fhir_status(doc_ref.get("status", "current")),
                 "type": _extract_codeable_text(doc_ref.get("type")),
-            })
-
-    return items
-
-
-async def retrieve_euputnice(client: httpx.AsyncClient) -> list[dict]:
-    """Retrieve e-Uputnice from CEZIH (ITI-67 DocumentReference search).
-
-    GET /doc-mhd-svc/api/v1/DocumentReference?type=uputnica
-    Convenience wrapper around search_documents for backward compatibility.
-    """
-    fhir_client = CezihFhirClient(client)
-    params = {
-        "type": "http://fhir.cezih.hr/specifikacije/vrste-dokumenata|uputnica",
-    }
-
-    response = await fhir_client.get("doc-mhd-svc/api/v1/DocumentReference", params=params)
-
-    items = []
-    if response.get("resourceType") == "Bundle":
-        for entry in response.get("entry", []):
-            doc_ref = entry.get("resource", {})
-            items.append({
-                "id": doc_ref.get("id", ""),
-                "datum_izdavanja": doc_ref.get("date", ""),
-                "izdavatelj": _extract_reference_display(doc_ref.get("context", {}).get("source", {})),
-                "svrha": _extract_codeable_text(doc_ref.get("type")),
-                "specijalist": _extract_reference_display(doc_ref.get("context", {}).get("encounter", {})),
-                "status": _map_fhir_status(doc_ref.get("status", "current")),
             })
 
     return items
@@ -499,152 +507,6 @@ def _extract_mbo_from_response(response: dict) -> str:
 
 
 # ============================================================
-# TC12-14: Visit Management (FHIR Messaging)
-# ============================================================
-
-
-async def create_visit(
-    client: httpx.AsyncClient,
-    patient_mbo: str,
-    practitioner_id: str,
-    org_code: str,
-    period_start: str,
-    admission_type_code: str = "9",
-) -> dict:
-    """Create a visit via FHIR messaging (TC12, code 1.1)."""
-    fhir_client = CezihFhirClient(client)
-    encounter = build_encounter_create(
-        patient_mbo=patient_mbo, practitioner_id=practitioner_id,
-        org_code=org_code, period_start=period_start,
-        admission_type_code=admission_type_code,
-    )
-    bundle = await build_message_bundle(
-        "1.1", encounter,
-        sender_org_code=org_code, author_practitioner_id=practitioner_id,
-    )
-    bundle = await add_signature(bundle, practitioner_id, http_client=client)
-    response = await fhir_client.process_message("encounter-services/api/v1", bundle)
-    result = parse_message_response(response)
-    if not result["success"]:
-        raise CezihError(result.get("error_message") or "Failed to create visit")
-    return {"visit_id": result["identifier"] or "", "success": True}
-
-
-async def update_visit(
-    client: httpx.AsyncClient,
-    visit_identifier: str,
-    practitioner_id: str,
-    org_code: str,
-    **updates: str,
-) -> dict:
-    """Update a visit via FHIR messaging (TC13, code 1.2)."""
-    fhir_client = CezihFhirClient(client)
-    encounter = build_encounter_update(
-        visit_identifier=visit_identifier,
-        period_start=updates.get("period_start"),
-        admission_type_code=updates.get("admission_type_code"),
-        org_code=org_code,
-        practitioner_id=practitioner_id,
-    )
-    bundle = await build_message_bundle(
-        "1.2", encounter,
-        sender_org_code=org_code, author_practitioner_id=practitioner_id,
-    )
-    bundle = await add_signature(bundle, practitioner_id, http_client=client)
-    response = await fhir_client.process_message("encounter-services/api/v1", bundle)
-    result = parse_message_response(response)
-    if not result["success"]:
-        raise CezihError(result.get("error_message") or "Failed to update visit")
-    return {"success": True}
-
-
-async def close_visit(
-    client: httpx.AsyncClient,
-    visit_identifier: str,
-    practitioner_id: str,
-    org_code: str,
-    period_start: str,
-    period_end: str,
-    admission_type_code: str = "9",
-    diagnosis_case_id: str | None = None,
-) -> dict:
-    """Close a visit via FHIR messaging (TC14, code 1.3)."""
-    fhir_client = CezihFhirClient(client)
-    encounter = build_encounter_close(
-        visit_identifier=visit_identifier,
-        period_start=period_start, period_end=period_end,
-        admission_type_code=admission_type_code,
-        org_code=org_code, diagnosis_case_id=diagnosis_case_id,
-    )
-    bundle = await build_message_bundle(
-        "1.3", encounter,
-        sender_org_code=org_code, author_practitioner_id=practitioner_id,
-    )
-    bundle = await add_signature(bundle, practitioner_id, http_client=client)
-    response = await fhir_client.process_message("encounter-services/api/v1", bundle)
-    result = parse_message_response(response)
-    if not result["success"]:
-        raise CezihError(result.get("error_message") or "Failed to close visit")
-    return {"success": True}
-
-
-async def reopen_visit(
-    client: httpx.AsyncClient,
-    visit_identifier: str,
-    practitioner_id: str,
-    org_code: str,
-    admission_type_code: str = "9",
-) -> dict:
-    """Reopen a closed visit via FHIR messaging (code 1.5)."""
-    fhir_client = CezihFhirClient(client)
-    encounter = build_encounter_reopen(
-        visit_identifier=visit_identifier,
-        admission_type_code=admission_type_code,
-        org_code=org_code,
-    )
-    bundle = await build_message_bundle(
-        "1.5", encounter,
-        sender_org_code=org_code, author_practitioner_id=practitioner_id,
-    )
-    bundle = await add_signature(bundle, practitioner_id, http_client=client)
-    response = await fhir_client.process_message("encounter-services/api/v1", bundle)
-    result = parse_message_response(response)
-    if not result["success"]:
-        raise CezihError(result.get("error_message") or "Failed to reopen visit")
-    return {"success": True}
-
-
-async def cancel_visit(
-    client: httpx.AsyncClient,
-    visit_identifier: str,
-    practitioner_id: str,
-    org_code: str,
-    period_start: str,
-    period_end: str | None = None,
-    admission_type_code: str = "9",
-    diagnosis_case_id: str | None = None,
-) -> dict:
-    """Cancel/storno a visit via FHIR messaging (code 1.4)."""
-    fhir_client = CezihFhirClient(client)
-    encounter = build_encounter_cancel(
-        visit_identifier=visit_identifier,
-        period_start=period_start, period_end=period_end,
-        admission_type_code=admission_type_code,
-        org_code=org_code, diagnosis_case_id=diagnosis_case_id,
-    )
-    bundle = await build_message_bundle(
-        "1.4", encounter,
-        sender_org_code=org_code, author_practitioner_id=practitioner_id,
-    )
-    bundle = await add_signature(bundle, practitioner_id, http_client=client)
-    response = await fhir_client.process_message("encounter-services/api/v1", bundle)
-    result = parse_message_response(response)
-    if not result["success"]:
-        raise CezihError(result.get("error_message") or "Failed to cancel visit")
-    return {"success": True}
-
-
-# ============================================================
 # TC15-17: Case Management (FHIR Messaging + QEDm)
 # ============================================================
 
@@ -807,12 +669,14 @@ async def replace_document(
 ) -> dict:
     """Replace a clinical document (TC19, ITI-65 with relatesTo)."""
     fhir_client = CezihFhirClient(client)
+    coding = get_cezih_document_coding(record_data.get("tip", "nalaz"))
     doc_ref = FHIRDocumentReference(
         status="current",
         type=FHIRCodeableConcept(
             coding=[FHIRCoding(
-                system="http://fhir.cezih.hr/specifikacije/vrste-dokumenata",
-                code=record_data.get("tip", "nalaz"),
+                system=coding["system"],
+                code=coding["code"],
+                display=coding["display"],
             )]
         ),
         subject=FHIRReference(reference=f"Patient/{patient_data.get('mbo', '')}"),

@@ -9,17 +9,11 @@ from app.services.cezih.message_builder import (
     CASE_ACTION_MAP,
     ID_CASE_GLOBAL,
     ID_CASE_LOCAL,
-    ID_VISIT,
     MESSAGE_TYPE_SYSTEM,
     build_condition_create,
     build_condition_data_update,
     build_condition_delete,
     build_condition_status_update,
-    build_encounter_cancel,
-    build_encounter_close,
-    build_encounter_create,
-    build_encounter_reopen,
-    build_encounter_update,
     build_message_bundle,
     parse_message_response,
 )
@@ -28,22 +22,17 @@ from app.services.cezih.models import (
     FHIRBundleSignature,
     FHIRCoding,
     FHIRCondition,
-    FHIREncounter,
     FHIRMessageHeader,
 )
 from app.services.cezih_mock_service import (
     mock_cancel_document,
-    mock_cancel_visit,
-    mock_close_visit,
     mock_create_case,
-    mock_create_visit,
     mock_expand_value_set,
     mock_find_organizations,
     mock_find_practitioners,
     mock_lookup_oid,
     mock_query_code_system,
     mock_register_foreigner,
-    mock_reopen_visit,
     mock_replace_document,
     mock_retrieve_cases,
     mock_retrieve_document,
@@ -55,19 +44,6 @@ from app.services.cezih_mock_service import (
 # ============================================================
 # FHIR Models
 # ============================================================
-
-
-def test_encounter_model_class_is_coding():
-    """Encounter.class must be FHIRCoding, not CodeableConcept."""
-    enc = FHIREncounter(
-        status="in-progress",
-        class_fhir=FHIRCoding(system="test", code="9"),
-    )
-    assert enc.class_fhir.code == "9"
-    dumped = enc.model_dump(by_alias=True)
-    assert "class" in dumped
-    assert dumped["class"]["code"] == "9"
-    assert "coding" not in dumped["class"]  # NOT CodeableConcept
 
 
 def test_message_header_has_event_coding():
@@ -97,57 +73,6 @@ def test_condition_model_new_fields():
     assert cond.onsetDateTime == "2026-01-15"
     assert cond.severity is not None
     assert len(cond.bodySite) == 1
-
-
-# ============================================================
-# Message Builder — Encounter
-# ============================================================
-
-
-def test_encounter_create_no_identifier():
-    enc = build_encounter_create(
-        patient_mbo="999990260", practitioner_id="1234567",
-        org_code="1234", period_start="2026-03-30T10:00:00+02:00",
-    )
-    assert enc["resourceType"] == "Encounter"
-    assert enc["status"] == "in-progress"
-    assert "identifier" not in enc
-    assert enc["subject"]["identifier"]["value"] == "999990260"
-    assert enc["serviceProvider"]["identifier"]["value"] == "1234"
-
-
-def test_encounter_update_requires_identifier():
-    enc = build_encounter_update(visit_identifier="visit-123")
-    assert enc["identifier"][0]["system"] == ID_VISIT
-    assert enc["identifier"][0]["value"] == "visit-123"
-    assert enc["status"] == "in-progress"
-
-
-def test_encounter_close_finished_with_period_end():
-    enc = build_encounter_close(
-        visit_identifier="visit-123",
-        period_start="2026-03-30T10:00:00Z", period_end="2026-03-30T11:00:00Z",
-        diagnosis_case_id="case-456",
-    )
-    assert enc["status"] == "finished"
-    assert enc["period"]["end"] == "2026-03-30T11:00:00Z"
-    assert len(enc["diagnosis"]) == 1
-    assert enc["diagnosis"][0]["condition"]["identifier"]["value"] == "case-456"
-
-
-def test_encounter_cancel_entered_in_error():
-    enc = build_encounter_cancel(
-        visit_identifier="visit-123", period_start="2026-03-30T10:00:00Z",
-    )
-    assert enc["status"] == "entered-in-error"
-    assert enc["identifier"][0]["value"] == "visit-123"
-
-
-def test_encounter_reopen_in_progress():
-    enc = build_encounter_reopen(visit_identifier="visit-123", org_code="1234")
-    assert enc["status"] == "in-progress"
-    assert enc["identifier"][0]["value"] == "visit-123"
-    assert enc["serviceProvider"]["identifier"]["value"] == "1234"
 
 
 # ============================================================
@@ -239,12 +164,12 @@ def test_parse_message_response_success():
     response = {
         "entry": [
             {"resource": {"resourceType": "MessageHeader", "response": {"code": "ok"}}},
-            {"resource": {"resourceType": "Encounter", "identifier": [{"system": ID_VISIT, "value": "new-visit-id"}]}},
+            {"resource": {"resourceType": "Condition", "identifier": [{"system": ID_CASE_GLOBAL, "value": "new-case-id"}]}},
         ]
     }
     result = parse_message_response(response)
     assert result["success"] is True
-    assert result["identifier"] == "new-visit-id"
+    assert result["identifier"] == "new-case-id"
 
 
 def test_parse_message_response_error():
@@ -315,41 +240,6 @@ async def test_mock_register_foreigner():
     assert result["mock"] is True
     assert result["success"] is True
     assert result["mbo"].startswith("F")
-
-
-# ============================================================
-# Mock Service — Visit Management
-# ============================================================
-
-
-@pytest.mark.asyncio
-async def test_mock_create_visit():
-    result = await mock_create_visit("999990260", "2026-03-30T10:00:00Z")
-    assert result["mock"] is True
-    assert result["success"] is True
-    assert result["visit_id"].startswith("MOCK-V-")
-    assert result["status"] == "in-progress"
-
-
-@pytest.mark.asyncio
-async def test_mock_close_visit():
-    result = await mock_close_visit("MOCK-V-123", "2026-03-30T11:00:00Z")
-    assert result["success"] is True
-    assert result["status"] == "finished"
-
-
-@pytest.mark.asyncio
-async def test_mock_reopen_visit():
-    result = await mock_reopen_visit("MOCK-V-123")
-    assert result["success"] is True
-    assert result["status"] == "in-progress"
-
-
-@pytest.mark.asyncio
-async def test_mock_cancel_visit():
-    result = await mock_cancel_visit("MOCK-V-123")
-    assert result["success"] is True
-    assert result["status"] == "entered-in-error"
 
 
 # ============================================================

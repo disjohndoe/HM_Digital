@@ -2,7 +2,7 @@
 """FHIR message Bundle builder for CEZIH $process-message operations.
 
 Builds Bundle type="message" with MessageHeader + resource + digital signature.
-Used for Visit Management (codes 1.x) and Case Management (codes 2.x).
+Used for Case Management (codes 2.x).
 """
 from __future__ import annotations
 
@@ -27,20 +27,14 @@ SIGNATURE_TYPE_CODE = "1.2.840.10065.1.12.1.1"  # Author's signature
 ID_MBO = "http://fhir.cezih.hr/specifikacije/identifikatori/MBO"
 ID_ORG = "http://fhir.cezih.hr/specifikacije/identifikatori/HZZO-sifra-zdravstvene-organizacije"
 ID_PRACTITIONER = "http://fhir.cezih.hr/specifikacije/identifikatori/HZJZ-broj-zdravstvenog-djelatnika"
-ID_VISIT = "http://fhir.cezih.hr/specifikacije/identifikatori/identifikator-posjete"
 ID_CASE_GLOBAL = "http://fhir.cezih.hr/specifikacije/identifikatori/identifikator-slucaja"
 ID_CASE_LOCAL = "http://fhir.cezih.hr/specifikacije/identifikatori/lokalni-identifikator-slucaja"
-ID_CASE_REF = "http://fhir.cezih.hr/specifikacije/identifikatori/slucaj"
 
-CS_ADMISSION_TYPE = "http://fhir.cezih.hr/specifikacije/CodeSystem/nacin-prijema"
 CS_ICD10_HR = "http://fhir.cezih.hr/specifikacije/CodeSystem/icd10-hr"
-CS_COST_PARTICIPATION = "http://fhir.cezih.hr/specifikacije/CodeSystem/sudjelovanje-u-troskovima"
-CS_COST_EXEMPTION = "http://fhir.cezih.hr/specifikacije/CodeSystem/sifra-oslobodjenja-od-sudjelovanja-u-troskovima"
 CS_ANNOTATION_TYPE = "http://fhir.cezih.hr/specifikacije/CodeSystem/annotation-type"
 CS_CONDITION_VER_STATUS = "http://terminology.hl7.org/CodeSystem/condition-ver-status"
 CS_CONDITION_CLINICAL = "http://terminology.hl7.org/CodeSystem/condition-clinical"
 
-EXT_COST_PARTICIPATION = "http://fhir.cezih.hr/specifikacije/StructureDefinition/hr-troskovi-sudjelovanje"
 EXT_ANNOTATION_TYPE = "http://fhir.cezih.hr/specifikacije/StructureDefinition/hr-annotation-type"
 
 
@@ -158,209 +152,6 @@ async def add_signature(
     }
 
     return bundle
-
-
-# --- Encounter Resource Builders ---
-
-
-def build_encounter_create(
-    *,
-    patient_mbo: str,
-    practitioner_id: str,
-    org_code: str,
-    period_start: str,
-    admission_type_code: str = "9",
-    admission_type_display: str | None = None,
-    cost_participation_code: str | None = None,
-    cost_exemption_code: str | None = None,
-) -> dict[str, Any]:
-    """Build Encounter for create visit (message code 1.1).
-
-    NO identifier — CEZIH assigns one.
-    """
-    encounter: dict[str, Any] = {
-        "resourceType": "Encounter",
-        "status": "in-progress",
-        "class": {
-            "system": CS_ADMISSION_TYPE,
-            "code": admission_type_code,
-            **({"display": admission_type_display} if admission_type_display else {}),
-        },
-        "subject": patient_ref(patient_mbo),
-        "participant": [
-            {"individual": practitioner_ref(practitioner_id)},
-        ],
-        "period": {"start": period_start},
-        "serviceProvider": org_ref(org_code),
-    }
-
-    if cost_participation_code:
-        ext: dict[str, Any] = {
-            "url": EXT_COST_PARTICIPATION,
-            "extension": [
-                {"url": "oznaka", "valueCoding": {"system": CS_COST_PARTICIPATION, "code": cost_participation_code}},
-            ],
-        }
-        if cost_exemption_code:
-            ext["extension"].append(
-                {"url": "sifra-oslobodjenja", "valueCoding": {
-                    "system": CS_COST_EXEMPTION, "code": cost_exemption_code,
-                }},
-            )
-        encounter["extension"] = [ext]
-
-    return encounter
-
-
-def build_encounter_update(
-    *,
-    visit_identifier: str,
-    period_start: str | None = None,
-    admission_type_code: str | None = None,
-    admission_type_display: str | None = None,
-    org_code: str | None = None,
-    practitioner_id: str | None = None,
-) -> dict[str, Any]:
-    """Build Encounter for update visit (message code 1.2).
-
-    MUST have identifier from CEZIH.
-    """
-    encounter: dict[str, Any] = {
-        "resourceType": "Encounter",
-        "identifier": [{"system": ID_VISIT, "value": visit_identifier}],
-        "status": "in-progress",
-    }
-
-    if admission_type_code:
-        encounter["class"] = {
-            "system": CS_ADMISSION_TYPE,
-            "code": admission_type_code,
-            **({"display": admission_type_display} if admission_type_display else {}),
-        }
-
-    if period_start:
-        encounter["period"] = {"start": period_start}
-
-    if org_code:
-        encounter["serviceProvider"] = org_ref(org_code)
-
-    if practitioner_id:
-        encounter["participant"] = [{"individual": practitioner_ref(practitioner_id)}]
-
-    return encounter
-
-
-def build_encounter_cancel(
-    *,
-    visit_identifier: str,
-    period_start: str,
-    period_end: str | None = None,
-    admission_type_code: str = "9",
-    admission_type_display: str | None = None,
-    org_code: str | None = None,
-    diagnosis_case_id: str | None = None,
-) -> dict[str, Any]:
-    """Build Encounter for cancel/storno visit (message code 1.4).
-
-    MUST have identifier. Status=entered-in-error.
-    """
-    encounter: dict[str, Any] = {
-        "resourceType": "Encounter",
-        "identifier": [{"system": ID_VISIT, "value": visit_identifier}],
-        "status": "entered-in-error",
-        "class": {
-            "system": CS_ADMISSION_TYPE,
-            "code": admission_type_code,
-            **({"display": admission_type_display} if admission_type_display else {}),
-        },
-        "period": {"start": period_start, **({"end": period_end} if period_end else {})},
-    }
-
-    if org_code:
-        encounter["serviceProvider"] = org_ref(org_code)
-
-    if diagnosis_case_id:
-        encounter["diagnosis"] = [
-            {
-                "condition": {
-                    "type": "Condition",
-                    "identifier": {"system": ID_CASE_REF, "value": diagnosis_case_id},
-                },
-            },
-        ]
-
-    return encounter
-
-
-def build_encounter_reopen(
-    *,
-    visit_identifier: str,
-    admission_type_code: str = "9",
-    admission_type_display: str | None = None,
-    org_code: str | None = None,
-) -> dict[str, Any]:
-    """Build Encounter for reopen visit (message code 1.5).
-
-    Minimal payload: identifier + status=in-progress + class + serviceProvider.
-    """
-    encounter: dict[str, Any] = {
-        "resourceType": "Encounter",
-        "identifier": [{"system": ID_VISIT, "value": visit_identifier}],
-        "status": "in-progress",
-        "class": {
-            "system": CS_ADMISSION_TYPE,
-            "code": admission_type_code,
-            **({"display": admission_type_display} if admission_type_display else {}),
-        },
-    }
-
-    if org_code:
-        encounter["serviceProvider"] = org_ref(org_code)
-
-    return encounter
-
-
-def build_encounter_close(
-    *,
-    visit_identifier: str,
-    period_start: str,
-    period_end: str,
-    admission_type_code: str = "9",
-    admission_type_display: str | None = None,
-    org_code: str | None = None,
-    diagnosis_case_id: str | None = None,
-) -> dict[str, Any]:
-    """Build Encounter for close visit (message code 1.3).
-
-    MUST have identifier. Status=finished. period.end required.
-    Optional diagnosis referencing a case.
-    """
-    encounter: dict[str, Any] = {
-        "resourceType": "Encounter",
-        "identifier": [{"system": ID_VISIT, "value": visit_identifier}],
-        "status": "finished",
-        "class": {
-            "system": CS_ADMISSION_TYPE,
-            "code": admission_type_code,
-            **({"display": admission_type_display} if admission_type_display else {}),
-        },
-        "period": {"start": period_start, "end": period_end},
-    }
-
-    if org_code:
-        encounter["serviceProvider"] = org_ref(org_code)
-
-    if diagnosis_case_id:
-        encounter["diagnosis"] = [
-            {
-                "condition": {
-                    "type": "Condition",
-                    "identifier": {"system": ID_CASE_REF, "value": diagnosis_case_id},
-                },
-            },
-        ]
-
-    return encounter
 
 
 # --- Condition Resource Builders ---
@@ -585,11 +376,11 @@ def parse_message_response(response_body: dict[str, Any]) -> dict[str, Any]:
 
         # Check for returned resource with identifier (e.g. CEZIH-assigned visit/case ID)
         rt = second.get("resourceType")
-        if rt in ("Encounter", "Condition"):
+        if rt == "Condition":
             identifiers = second.get("identifier", [])
             for ident in identifiers:
                 sys = ident.get("system", "")
-                if sys in (ID_VISIT, ID_CASE_GLOBAL):
+                if sys == ID_CASE_GLOBAL:
                     result["identifier"] = ident.get("value")
                     break
 

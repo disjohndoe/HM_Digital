@@ -7,7 +7,6 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.audit_log import AuditLog
-from app.models.cezih_euputnica import CezihEUputnica
 from app.models.medical_record import MedicalRecord
 
 _MOCK_NAMES = [
@@ -82,7 +81,6 @@ async def mock_send_enalaz(
     patient_id: UUID,
     record_id: UUID,
     user_id: UUID | None = None,
-    uputnica_id: str | None = None,
 ) -> dict:
     import os
 
@@ -103,26 +101,13 @@ async def mock_send_enalaz(
         record.cezih_reference_id = ref
         await db.flush()
 
-    # Close the linked referral in the DB if provided
-    if uputnica_id:
-        uputnica_result = await db.execute(
-            select(CezihEUputnica).where(
-                CezihEUputnica.tenant_id == tenant_id,
-                CezihEUputnica.external_id == uputnica_id,
-            )
-        )
-        uputnica_row = uputnica_result.scalar_one_or_none()
-        if uputnica_row:
-            uputnica_row.status = "Zatvorena"
-            await db.flush()
-
     details: dict = {
         "patient_id": str(patient_id),
         "record_id": str(record_id),
         "reference_id": ref,
     }
-    if uputnica_id:
-        details["uputnica_id"] = uputnica_id
+    if record and record.preporucena_terapija:
+        details["preporucena_terapija_count"] = len(record.preporucena_terapija)
 
     if user_id:
         await _write_audit(
@@ -138,149 +123,6 @@ async def mock_send_enalaz(
         "reference_id": ref,
         "sent_at": now.isoformat(),
     }
-
-
-_MOCK_EUPUTNICE = [
-    {
-        "external_id": "EU-2026-001",
-        "datum_izdavanja": "2026-03-15",
-        "izdavatelj": "DOM ZDRAVLJA ZAGREB-CENTAR",
-        "svrha": "Kardiološki pregled",
-        "specijalist": "Dr. sc. med. Josip Babić, dr. med.",
-        "status": "Otvorena",
-    },
-    {
-        "external_id": "EU-2026-002",
-        "datum_izdavanja": "2026-03-10",
-        "izdavatelj": "DOM ZDRAVLJA SPLIT",
-        "svrha": "Dermatološka pretraga",
-        "specijalist": "Prof. dr. sc. Marija Perić",
-        "status": "Zatvorena",
-    },
-    {
-        "external_id": "EU-2026-003",
-        "datum_izdavanja": "2026-03-20",
-        "izdavatelj": "POLIKLINIKA RIJEKA",
-        "svrha": "Ortopedska konzultacija",
-        "specijalist": "Dr. Ante Tomić, dr. med.",
-        "status": "Otvorena",
-    },
-    {
-        "external_id": "EU-2026-004",
-        "datum_izdavanja": "2026-03-24",
-        "izdavatelj": "KBC ZAGREB",
-        "svrha": "Neurološki pregled",
-        "specijalist": "Dr. sc. Ivan Matić, dr. med.",
-        "status": "Otvorena",
-    },
-    {
-        "external_id": "EU-2026-005",
-        "datum_izdavanja": "2026-03-25",
-        "izdavatelj": "DOM ZDRAVLJA OSIJEK",
-        "svrha": "Oftalmološki pregled",
-        "specijalist": "Dr. Lana Herceg, dr. med.",
-        "status": "Otvorena",
-    },
-]
-
-
-async def mock_retrieve_euputnice(
-    db: AsyncSession | None = None,
-    user_id: UUID | None = None,
-    tenant_id: UUID | None = None,
-) -> dict:
-    """Fetch new e-Uputnice from CEZIH (mock) and persist them.
-
-    Existing referrals are updated; new ones are inserted.
-    Returns only the newly fetched batch (for the toast count).
-    """
-    new_count = 0
-
-    if db and tenant_id:
-        # Determine which referrals should be closed (e-Nalaz linked)
-        nalaz_result = await db.execute(
-            select(AuditLog.details).where(
-                AuditLog.tenant_id == tenant_id,
-                AuditLog.resource_type == "cezih",
-                AuditLog.action == "e_nalaz_send",
-            )
-        )
-        closed_ids: set[str] = set()
-        for (details_str,) in nalaz_result.all():
-            if details_str:
-                details = json.loads(details_str)
-                uid = details.get("uputnica_id")
-                if uid:
-                    closed_ids.add(uid)
-
-        # Upsert each mock referral into the DB
-        for item in _MOCK_EUPUTNICE:
-            ext_id = item["external_id"]
-            status = "Zatvorena" if ext_id in closed_ids or item["status"] == "Zatvorena" else "Otvorena"
-
-            existing = await db.execute(
-                select(CezihEUputnica).where(
-                    CezihEUputnica.tenant_id == tenant_id,
-                    CezihEUputnica.external_id == ext_id,
-                )
-            )
-            row = existing.scalar_one_or_none()
-            if row:
-                # Update status if changed
-                row.status = status
-            else:
-                db.add(CezihEUputnica(
-                    tenant_id=tenant_id,
-                    external_id=ext_id,
-                    datum_izdavanja=item["datum_izdavanja"],
-                    izdavatelj=item["izdavatelj"],
-                    svrha=item["svrha"],
-                    specijalist=item["specijalist"],
-                    status=status,
-                ))
-                new_count += 1
-
-        await db.flush()
-
-    if db and user_id and tenant_id:
-        await _write_audit(
-            db, tenant_id, user_id,
-            action="e_uputnica_retrieve",
-            details={"count": len(_MOCK_EUPUTNICE), "new": new_count},
-        )
-
-    # Return the full persisted list
-    return await get_stored_euputnice(db, tenant_id)
-
-
-async def get_stored_euputnice(
-    db: AsyncSession | None,
-    tenant_id: UUID | None,
-) -> dict:
-    """Read all persisted e-Uputnice for the tenant."""
-    if not db or not tenant_id:
-        return {"mock": True, "items": []}
-
-    result = await db.execute(
-        select(CezihEUputnica)
-        .where(CezihEUputnica.tenant_id == tenant_id)
-        .order_by(CezihEUputnica.datum_izdavanja.desc())
-    )
-    rows = result.scalars().all()
-
-    items = [
-        {
-            "mock": True,
-            "id": r.external_id,
-            "datum_izdavanja": r.datum_izdavanja,
-            "izdavatelj": r.izdavatelj,
-            "svrha": r.svrha,
-            "specijalist": r.specijalist,
-            "status": r.status,
-        }
-        for r in rows
-    ]
-    return {"mock": True, "items": items}
 
 
 async def mock_send_erecept(
@@ -608,92 +450,6 @@ async def mock_register_foreigner(
 
 
 # ============================================================
-# TC12-14: Visit Management (Mock)
-# ============================================================
-
-
-async def mock_create_visit(
-    patient_mbo: str,
-    period_start: str,
-    admission_type_code: str = "9",
-    db: AsyncSession | None = None,
-    user_id: UUID | None = None,
-    tenant_id: UUID | None = None,
-) -> dict:
-    import os
-    visit_id = f"MOCK-V-{os.urandom(6).hex()}"
-    result = {
-        "mock": True,
-        "success": True,
-        "visit_id": visit_id,
-        "status": "in-progress",
-        "created_at": datetime.now(UTC).isoformat(),
-    }
-    if db and user_id and tenant_id:
-        await _write_audit(
-            db, tenant_id, user_id,
-            action="visit_create",
-            details={"mbo": patient_mbo, "visit_id": visit_id},
-        )
-    return result
-
-
-async def mock_update_visit(
-    visit_id: str,
-    db: AsyncSession | None = None,
-    user_id: UUID | None = None,
-    tenant_id: UUID | None = None,
-    **updates: str,
-) -> dict:
-    result = {"mock": True, "success": True, "visit_id": visit_id}
-    if db and user_id and tenant_id:
-        await _write_audit(db, tenant_id, user_id, action="visit_update", details={"visit_id": visit_id})
-    return result
-
-
-async def mock_close_visit(
-    visit_id: str,
-    period_end: str,
-    diagnosis_case_id: str | None = None,
-    db: AsyncSession | None = None,
-    user_id: UUID | None = None,
-    tenant_id: UUID | None = None,
-) -> dict:
-    result = {"mock": True, "success": True, "visit_id": visit_id, "status": "finished"}
-    if db and user_id and tenant_id:
-        await _write_audit(
-            db, tenant_id, user_id,
-            action="visit_close",
-            details={"visit_id": visit_id, "period_end": period_end},
-        )
-    return result
-
-
-async def mock_reopen_visit(
-    visit_id: str,
-    db: AsyncSession | None = None,
-    user_id: UUID | None = None,
-    tenant_id: UUID | None = None,
-) -> dict:
-    result = {"mock": True, "success": True, "visit_id": visit_id, "status": "in-progress"}
-    if db and user_id and tenant_id:
-        await _write_audit(db, tenant_id, user_id, action="visit_reopen", details={"visit_id": visit_id})
-    return result
-
-
-async def mock_cancel_visit(
-    visit_id: str,
-    db: AsyncSession | None = None,
-    user_id: UUID | None = None,
-    tenant_id: UUID | None = None,
-) -> dict:
-    result = {"mock": True, "success": True, "visit_id": visit_id, "status": "entered-in-error"}
-    if db and user_id and tenant_id:
-        await _write_audit(db, tenant_id, user_id, action="visit_cancel", details={"visit_id": visit_id})
-    return result
-
-
-# ============================================================
 # TC15-17: Case Management (Mock)
 # ============================================================
 
@@ -785,19 +541,19 @@ async def mock_update_case_data(
 _MOCK_DOCUMENTS = [
     {"id": "DOC-001", "datum_izdavanja": "2026-03-25",
      "izdavatelj": "DOM ZDRAVLJA ZAGREB-CENTAR", "svrha": "Kardiološki nalaz",
-     "specijalist": "Dr. Babić", "status": "Otvorena", "type": "nalaz",
+     "specijalist": "Dr. Babić", "status": "Otvorena", "type": "specijalisticki_nalaz",
      "patient_mbo": "999990260"},
     {"id": "DOC-002", "datum_izdavanja": "2026-03-20",
-     "izdavatelj": "KBC ZAGREB", "svrha": "RTG snimka",
-     "specijalist": "Dr. Perić", "status": "Otvorena", "type": "nalaz",
+     "izdavatelj": "KBC ZAGREB", "svrha": "RTG snimka — ambulantno izvješće",
+     "specijalist": "Dr. Perić", "status": "Otvorena", "type": "ambulantno_izvjesce",
      "patient_mbo": "999990260"},
     {"id": "DOC-003", "datum_izdavanja": "2026-03-15",
      "izdavatelj": "POLIKLINIKA RIJEKA", "svrha": "Laboratorijski nalaz",
      "specijalist": "Dr. Tomić", "status": "Zatvorena", "type": "nalaz",
      "patient_mbo": "999990261"},
     {"id": "DOC-004", "datum_izdavanja": "2026-03-10",
-     "izdavatelj": "DOM ZDRAVLJA SPLIT", "svrha": "Dermatološki pregled",
-     "specijalist": "Dr. Matić", "status": "Otvorena", "type": "uputnica",
+     "izdavatelj": "DOM ZDRAVLJA SPLIT", "svrha": "Otpusno pismo — dermatologija",
+     "specijalist": "Dr. Matić", "status": "Otvorena", "type": "otpusno_pismo",
      "patient_mbo": "999990260"},
     {"id": "DOC-005", "datum_izdavanja": "2026-03-05",
      "izdavatelj": "DOM ZDRAVLJA OSIJEK", "svrha": "Oftalmološka uputnica",
