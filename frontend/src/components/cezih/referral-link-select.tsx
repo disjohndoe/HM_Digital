@@ -27,7 +27,7 @@ export function ReferralLinkSelect({ value, onChange, referrals }: ReferralLinkS
         <SelectTrigger className="h-8 text-xs">
           <SelectValue placeholder="Odaberi uputnicu (opcionalno)" />
         </SelectTrigger>
-        <SelectContent>
+        <SelectContent className="min-w-[400px]">
           <SelectItem value="none">Bez uputnice</SelectItem>
           {openReferrals.map((ref) => (
             <SelectItem key={ref.id} value={ref.id}>

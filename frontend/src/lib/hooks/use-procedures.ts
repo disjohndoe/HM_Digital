@@ -65,20 +65,24 @@ export function usePerformedProcedures(
   patientId?: string,
   dateFrom?: string,
   dateTo?: string,
+  appointmentId?: string,
+  medicalRecordId?: string,
 ) {
   const params = new URLSearchParams()
   if (patientId) params.set("patient_id", patientId)
   if (dateFrom) params.set("date_from", dateFrom)
   if (dateTo) params.set("date_to", dateTo)
+  if (appointmentId) params.set("appointment_id", appointmentId)
+  if (medicalRecordId) params.set("medical_record_id", medicalRecordId)
   params.set("limit", "50")
 
   return useQuery({
-    queryKey: ["performed-procedures", patientId, dateFrom, dateTo],
+    queryKey: ["performed-procedures", patientId, dateFrom, dateTo, appointmentId, medicalRecordId],
     queryFn: () =>
       api.get<PaginatedResponse<PerformedProcedure>>(
         `/performed-procedures?${params.toString()}`
       ),
-    enabled: !!patientId,
+    enabled: !!(patientId || appointmentId || medicalRecordId),
   })
 }
 

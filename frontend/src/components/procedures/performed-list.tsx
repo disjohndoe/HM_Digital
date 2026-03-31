@@ -40,14 +40,17 @@ import {
   useCreatePerformed,
   useProcedures,
 } from "@/lib/hooks/use-procedures"
+import { useMedicalRecords } from "@/lib/hooks/use-medical-records"
+import { RECORD_TIP } from "@/lib/constants"
 import { formatDateHR, formatCurrencyEUR } from "@/lib/utils"
 import type { PerformedProcedureCreate } from "@/lib/types"
 
 const performedSchema = z.object({
   procedure_id: z.string().min(1, "Postupak je obavezan"),
   datum: z.string().min(1, "Datum je obavezan"),
-  cijena_eur: z.number().min(0).optional(),
+  cijena_eur: z.coerce.number().min(0).optional(),
   napomena: z.string().optional(),
+  medical_record_id: z.string().optional(),
 })
 
 type PerformedFormData = z.infer<typeof performedSchema>
@@ -60,9 +63,11 @@ export function PerformedList({ patientId }: PerformedListProps) {
   const [formOpen, setFormOpen] = useState(false)
   const { data, isLoading } = usePerformedProcedures(patientId)
   const { data: proceduresData } = useProcedures(undefined, undefined, 0, 100)
+  const { data: recordsData } = useMedicalRecords(patientId)
   const createMutation = useCreatePerformed()
 
   const procedures = proceduresData?.items ?? []
+  const records = recordsData?.items ?? []
 
   const {
     register,
@@ -86,6 +91,7 @@ export function PerformedList({ patientId }: PerformedListProps) {
         datum: new Date().toISOString().split("T")[0],
         cijena_eur: undefined,
         napomena: undefined,
+        medical_record_id: undefined,
       })
     }
   }, [formOpen, reset])
@@ -98,6 +104,7 @@ export function PerformedList({ patientId }: PerformedListProps) {
         datum: data.datum,
         cijena_cents: data.cijena_eur != null ? Math.round(data.cijena_eur * 100) : undefined,
         napomena: data.napomena || undefined,
+        medical_record_id: data.medical_record_id || undefined,
       }
       await createMutation.mutateAsync(payload)
       toast.success("Postupak zabilježen")
@@ -183,7 +190,7 @@ export function PerformedList({ patientId }: PerformedListProps) {
                 <SelectTrigger>
                   <SelectValue placeholder="Odaberite postupak" />
                 </SelectTrigger>
-                <SelectContent>
+                <SelectContent className="min-w-[400px]">
                   {procedures.map((p) => (
                     <SelectItem key={p.id} value={p.id}>
                       [{p.sifra}] {p.naziv} — {formatCurrencyEUR(p.cijena_cents / 100)}
@@ -229,6 +236,29 @@ export function PerformedList({ patientId }: PerformedListProps) {
                 {...register("napomena")}
               />
             </div>
+
+            {records.length > 0 && (
+              <div className="space-y-2">
+                <Label>Povezani nalaz (opcionalno)</Label>
+                <Select
+                  value={watch("medical_record_id") ?? ""}
+                  onValueChange={(v) => setValue("medical_record_id", v === "none" ? "" : (v ?? ""))}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Bez povezanog nalaza" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">Bez povezanog nalaza</SelectItem>
+                    {records.map((r) => (
+                      <SelectItem key={r.id} value={r.id}>
+                        {formatDateHR(r.datum)} — {RECORD_TIP[r.tip] || r.tip}
+                        {r.dijagnoza_mkb ? ` (${r.dijagnoza_mkb})` : ""}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
 
             <div className="flex justify-end gap-2 pt-2">
               <Button type="button" variant="outline" onClick={() => setFormOpen(false)}>

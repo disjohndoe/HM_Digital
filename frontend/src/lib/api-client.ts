@@ -39,6 +39,14 @@ async function refreshTokens(): Promise<{ access_token: string; refresh_token: s
   return refreshPromise;
 }
 
+function extractErrorMessage(detail: unknown): string {
+  if (Array.isArray(detail)) {
+    return detail.map((e: { msg?: string }) => e.msg || String(e)).join(", ")
+  }
+  if (typeof detail === "string") return detail
+  return String(detail)
+}
+
 function handleAuthFailure(): never {
   localStorage.removeItem("access_token");
   localStorage.removeItem("refresh_token");
@@ -82,8 +90,10 @@ async function apiClient<T>(endpoint: string, options: RequestOptions = {}): Pro
 
         if (!retryRes.ok) {
           const errorBody = await retryRes.json().catch(() => null);
-          throw new Error(errorBody?.detail || `API error: ${retryRes.status} ${retryRes.statusText}`);
+          const message = errorBody?.detail ? extractErrorMessage(errorBody.detail) : `API error: ${retryRes.status} ${retryRes.statusText}`;
+          throw new Error(message);
         }
+        if (retryRes.status === 204) return undefined as T;
         return retryRes.json();
       } catch {
         // Refresh failed, clear tokens
@@ -95,10 +105,11 @@ async function apiClient<T>(endpoint: string, options: RequestOptions = {}): Pro
 
   if (!res.ok) {
     const errorBody = await res.json().catch(() => null);
-    const message = errorBody?.detail || `API error: ${res.status} ${res.statusText}`;
+    const message = errorBody?.detail ? extractErrorMessage(errorBody.detail) : `API error: ${res.status} ${res.statusText}`;
     throw new Error(message);
   }
 
+  if (res.status === 204) return undefined as T;
   return res.json();
 }
 
@@ -124,9 +135,9 @@ async function apiClientRaw(endpoint: string): Promise<Response> {
         });
 
         if (!retryRes.ok) {
-          // MINOR 1 fix: extract error details from response
           const errorBody = await retryRes.json().catch(() => null);
-          throw new Error(errorBody?.detail || `API error: ${retryRes.status} ${retryRes.statusText}`);
+          const message = errorBody?.detail ? extractErrorMessage(errorBody.detail) : `API error: ${retryRes.status} ${retryRes.statusText}`;
+          throw new Error(message);
         }
         return retryRes;
       } catch {
@@ -138,9 +149,9 @@ async function apiClientRaw(endpoint: string): Promise<Response> {
   }
 
   if (!res.ok) {
-    // MINOR 1 fix: extract error details
     const errorBody = await res.json().catch(() => null);
-    throw new Error(errorBody?.detail || `API error: ${res.status} ${res.statusText}`);
+    const message = errorBody?.detail ? extractErrorMessage(errorBody.detail) : `API error: ${res.status} ${res.statusText}`;
+    throw new Error(message);
   }
 
   return res;

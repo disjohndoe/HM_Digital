@@ -1,5 +1,6 @@
 "use client"
 
+import { useEffect, useMemo } from "react"
 import { useForm } from "react-hook-form"
 import { standardSchemaResolver } from "@hookform/resolvers/standard-schema"
 import { z } from "zod"
@@ -35,6 +36,7 @@ const userSchema = z.object({
   titula: z.string().nullable().optional(),
   telefon: z.string().nullable().optional(),
   role: z.string().min(1, "Uloga je obavezna"),
+  practitioner_id: z.string().nullable().optional(),
 })
 
 export type UserFormData = z.infer<typeof userSchema>
@@ -75,6 +77,17 @@ export function UserFormDialog({
     })
   }
 
+  const defaultFormValues: UserFormData = useMemo(() => ({
+    email: user?.email ?? "",
+    password: "",
+    ime: user?.ime ?? "",
+    prezime: user?.prezime ?? "",
+    titula: user?.titula ?? null,
+    telefon: user?.telefon ?? null,
+    role: user?.role ?? "doktor",
+    practitioner_id: user?.practitioner_id ?? null,
+  }), [user])
+
   const {
     register,
     handleSubmit,
@@ -83,16 +96,12 @@ export function UserFormDialog({
     formState: { errors },
   } = useForm<UserFormData>({
     resolver: standardSchemaResolver(userSchema),
-    defaultValues: {
-      email: user?.email ?? "",
-      password: "",
-      ime: user?.ime ?? "",
-      prezime: user?.prezime ?? "",
-      titula: user?.titula ?? null,
-      telefon: user?.telefon ?? null,
-      role: user?.role ?? "doktor",
-    },
+    defaultValues: defaultFormValues,
   })
+
+  useEffect(() => {
+    reset(defaultFormValues)
+  }, [user, defaultFormValues, reset])
 
   const handleFormSubmit = (data: UserFormData) => {
     const payload = { ...data }
@@ -139,6 +148,11 @@ export function UserFormDialog({
           <div className="space-y-2">
             <Label htmlFor="titula">Titula</Label>
             <Input id="titula" placeholder="dr. med., spec. ..." {...register("titula")} />
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="practitioner_id">HZJZ broj</Label>
+            <Input id="practitioner_id" placeholder="Broj zdravstvenog djelatnika" {...register("practitioner_id")} />
           </div>
 
           <div className="space-y-2">

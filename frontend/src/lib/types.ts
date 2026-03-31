@@ -32,6 +32,7 @@ export interface User {
   created_at: string;
   card_holder_name: string | null;
   card_certificate_oib: string | null;
+  practitioner_id: string | null;
   tenant?: Tenant;
 }
 
@@ -65,6 +66,7 @@ export interface UserCreate {
   titula?: string;
   telefon?: string;
   role: string;
+  practitioner_id?: string | null;
 }
 
 export interface Patient {
@@ -205,6 +207,7 @@ export interface PerformedProcedure {
   id: string;
   patient_id: string;
   appointment_id: string | null;
+  medical_record_id: string | null;
   procedure_id: string;
   doktor_id: string;
   lokacija: string | null;
@@ -224,6 +227,7 @@ export interface PerformedProcedureCreate {
   patient_id: string;
   procedure_id: string;
   appointment_id?: string | null;
+  medical_record_id?: string | null;
   lokacija?: string | null;
   datum: string;
   cijena_cents?: number | null;
@@ -253,6 +257,7 @@ export interface MedicalRecord {
   cezih_sent: boolean;
   cezih_sent_at: string | null;
   cezih_reference_id: string | null;
+  cezih_storno: boolean;
   sensitivity: string;
   doktor_ime: string | null;
   doktor_prezime: string | null;
@@ -420,6 +425,51 @@ export interface EReceptStornoResponse {
   status: string;
 }
 
+// --- Prescriptions ---
+
+export interface PrescriptionLijekEntry {
+  atk: string;
+  naziv: string;
+  oblik: string;
+  jacina: string;
+  kolicina: number;
+  doziranje: string;
+  napomena: string;
+}
+
+export interface Prescription {
+  id: string;
+  patient_id: string;
+  doktor_id: string;
+  medical_record_id: string | null;
+  lijekovi: PrescriptionLijekEntry[];
+  cezih_sent: boolean;
+  cezih_sent_at: string | null;
+  cezih_recept_id: string | null;
+  cezih_storno: boolean;
+  cezih_storno_at: string | null;
+  napomena: string | null;
+  doktor_ime: string | null;
+  doktor_prezime: string | null;
+  tenant_id: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface PrescriptionCreate {
+  patient_id: string;
+  medical_record_id?: string | null;
+  lijekovi: Omit<PrescriptionLijekEntry, "oblik" | "jacina">[];
+  napomena?: string | null;
+}
+
+export interface PrescriptionSendResponse {
+  prescription_id: string;
+  cezih_recept_id: string;
+  success: boolean;
+  mock: boolean;
+}
+
 // --- CEZIH Activity Log ---
 
 export interface CezihActivityItem {
@@ -451,6 +501,7 @@ export interface PatientCezihENalaz {
   tip: string;
   reference_id: string | null;
   cezih_sent_at: string | null;
+  cezih_storno: boolean;
 }
 
 export interface PatientCezihERecept {

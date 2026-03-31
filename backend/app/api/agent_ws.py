@@ -87,6 +87,10 @@ async def agent_websocket(websocket: WebSocket):
         logger.exception("Agent WebSocket error for tenant %s", tenant_id)
     finally:
         ping_task.cancel()
+        # Revoke card-required sessions if card was inserted when agent disconnected
+        conn = agent_manager.get(tenant_id)
+        if conn and conn.card_inserted:
+            await _handle_card_removal(tenant_id)
         await agent_manager.disconnect(tenant_id)
 
 

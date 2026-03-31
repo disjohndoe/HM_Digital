@@ -160,11 +160,9 @@ export function VisitManagement({ patientId, patientMbo }: VisitManagementProps)
         <div className="flex items-center gap-2">
           <MockBadge />
           <Dialog open={createOpen} onOpenChange={setCreateOpen}>
-            <DialogTrigger>
-              <Button size="sm" disabled={!patientMbo}>
-                <Play className="h-4 w-4 mr-1" />
-                Nova posjeta
-              </Button>
+            <DialogTrigger render={<Button size="sm" disabled={!patientMbo} />}>
+              <Play className="h-4 w-4 mr-1" />
+              Nova posjeta
             </DialogTrigger>
             <DialogContent>
               <DialogHeader>

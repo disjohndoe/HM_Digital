@@ -127,11 +127,9 @@ export function CaseManagement({ patientId, patientMbo }: CaseManagementProps) {
         <div className="flex items-center gap-2">
           <MockBadge />
           <Dialog open={createOpen} onOpenChange={setCreateOpen}>
-            <DialogTrigger>
-              <Button size="sm" disabled={!patientMbo}>
-                <Plus className="h-4 w-4 mr-1" />
-                Novi slučaj
-              </Button>
+            <DialogTrigger render={<Button size="sm" disabled={!patientMbo} />}>
+              <Plus className="h-4 w-4 mr-1" />
+              Novi slučaj
             </DialogTrigger>
             <DialogContent className="max-w-lg">
               <DialogHeader>

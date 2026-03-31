@@ -36,7 +36,7 @@ interface RecordListProps {
 export function RecordList({ patientId }: RecordListProps) {
   const [tipFilter, setTipFilter] = useState<string>("")
   const [formOpen, setFormOpen] = useState(false)
-  const [viewRecord, setViewRecord] = useState<MedicalRecord | null>(null)
+  const [viewRecordId, setViewRecordId] = useState<string | null>(null)
   const [editRecord, setEditRecord] = useState<MedicalRecord | null>(null)
 
   const { canCreateMedicalRecord, canEditMedicalRecord } = usePermissions()
@@ -44,16 +44,17 @@ export function RecordList({ patientId }: RecordListProps) {
     patientId,
     tipFilter || undefined,
   )
+  const records = data?.items ?? []
+  const viewRecord = viewRecordId ? records.find((r) => r.id === viewRecordId) ?? null : null
+
   function handleEdit(record: MedicalRecord) {
-    setViewRecord(null)
+    setViewRecordId(null)
     setEditRecord(record)
   }
 
   if (isLoading) {
     return <LoadingSpinner text="Učitavanje..." />
   }
-
-  const records = data?.items ?? []
 
   return (
     <div className="space-y-4">
@@ -125,8 +126,8 @@ export function RecordList({ patientId }: RecordListProps) {
                       {RECORD_SENSITIVITY[r.sensitivity]}
                     </Badge>
                   )}
-                  <Badge variant={r.cezih_sent ? "default" : "outline"} className={r.cezih_sent ? "bg-green-100 text-green-800" : "text-muted-foreground"}>
-                    {r.cezih_sent ? "Poslan" : "Nije poslan"}
+                  <Badge variant={r.cezih_sent ? "default" : "outline"} className={r.cezih_storno ? "bg-red-100 text-red-800" : r.cezih_sent ? "bg-green-100 text-green-800" : "text-muted-foreground"}>
+                    {r.cezih_storno ? "Storniran" : r.cezih_sent ? "Poslan" : "Nije poslan"}
                   </Badge>
                 </TableCell>
                 <TableCell className="text-right">
@@ -136,7 +137,7 @@ export function RecordList({ patientId }: RecordListProps) {
                       size="icon-sm"
                       onClick={() => {
                         setEditRecord(null)
-                        setViewRecord(r)
+                        setViewRecordId(r.id)
                       }}
                     >
                       <EyeIcon className="h-4 w-4" />
@@ -174,7 +175,7 @@ export function RecordList({ patientId }: RecordListProps) {
       {viewRecord && (
         <RecordDetail
           open={!!viewRecord}
-          onOpenChange={(open) => !open && setViewRecord(null)}
+          onOpenChange={(open) => !open && setViewRecordId(null)}
           record={viewRecord}
           patientId={patientId}
           onEdit={() => handleEdit(viewRecord)}

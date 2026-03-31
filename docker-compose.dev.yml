@@ -24,7 +24,18 @@ services:
       - ./backend:/app
 
   frontend:
+    build:
+      context: ./frontend
+      target: dev
     ports:
       - "3000:3000"
     environment:
-      NEXT_PUBLIC_API_URL: ${API_URL:-http://localhost:8000}
+      NEXT_PUBLIC_API_URL: ${API_URL:-http://localhost:8000/api}
+      WATCHPACK_POLLING: "true"
+    volumes:
+      - ./frontend/src:/app/src
+      - ./frontend/public:/app/public
+    deploy:
+      resources:
+        limits:
+          memory: 1G

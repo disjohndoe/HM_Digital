@@ -1,7 +1,7 @@
 "use client"
 
 import { useState } from "react"
-import { Loader2, Shield, Pill, FileText, Trash2 } from "lucide-react"
+import { Loader2, Shield, FileText, Trash2, RefreshCw } from "lucide-react"
 import { toast } from "sonner"
 
 import { Button } from "@/components/ui/button"
@@ -18,10 +18,10 @@ import {
 import { ConfirmDialog } from "@/components/shared/confirm-dialog"
 import { Skeleton } from "@/components/ui/skeleton"
 import { MockBadge } from "@/components/cezih/mock-badge"
-import { EReceptDialog } from "@/components/cezih/e-recept-dialog"
+import { PrescriptionForm } from "@/components/prescriptions/prescription-form"
 import { VisitManagement } from "@/components/cezih/visit-management"
 import { CaseManagement } from "@/components/cezih/case-management"
-import { usePatientCezihSummary, useInsuranceCheck, useCancelERecept } from "@/lib/hooks/use-cezih"
+import { usePatientCezihSummary, useInsuranceCheck, useCancelDocument, useReplaceDocument } from "@/lib/hooks/use-cezih"
 import { OSIGURANJE_STATUS, RECORD_TIP } from "@/lib/constants"
 import { formatDateTimeHR } from "@/lib/utils"
 
@@ -33,9 +33,11 @@ interface PatientCezihTabProps {
 export function PatientCezihTab({ patientId, patientMbo }: PatientCezihTabProps) {
   const { data: summary, isLoading } = usePatientCezihSummary(patientId)
   const insuranceCheck = useInsuranceCheck()
-  const cancelERecept = useCancelERecept()
+  const cancelDocument = useCancelDocument()
+  const replaceDocument = useReplaceDocument()
   const [eReceptOpen, setEReceptOpen] = useState(false)
-  const [stornoTarget, setStornoTarget] = useState<string | null>(null)
+  const [nalazStornoTarget, setNalazStornoTarget] = useState<string | null>(null)
+  const [nalazReplaceTarget, setNalazReplaceTarget] = useState<string | null>(null)
 
   const handleCheckInsurance = () => {
     if (!patientMbo) {
@@ -121,8 +123,7 @@ export function PatientCezihTab({ patientId, patientMbo }: PatientCezihTabProps)
               variant="outline"
               onClick={() => setEReceptOpen(true)}
             >
-              <Pill className="mr-2 h-3 w-3" />
-              Pošalji e-Recept
+              Novi e-Recept
             </Button>
             <Button
               size="sm"
@@ -158,7 +159,8 @@ export function PatientCezihTab({ patientId, patientMbo }: PatientCezihTabProps)
                   <TableHead>Datum</TableHead>
                   <TableHead>Tip</TableHead>
                   <TableHead className="hidden sm:table-cell">Referenca</TableHead>
-                  <TableHead>Poslano</TableHead>
+                  <TableHead>Status</TableHead>
+                  <TableHead className="text-right">Akcije</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -173,80 +175,44 @@ export function PatientCezihTab({ patientId, patientMbo }: PatientCezihTabProps)
                     <TableCell className="hidden sm:table-cell font-mono text-xs">
                       {item.reference_id || "—"}
                     </TableCell>
-                    <TableCell className="text-xs text-muted-foreground">
-                      {item.cezih_sent_at ? formatDateTimeHR(item.cezih_sent_at) : "—"}
+                    <TableCell>
+                      <Badge
+                        variant="outline"
+                        className={
+                          item.cezih_storno
+                            ? "bg-red-100 text-red-800 border-red-200"
+                            : "bg-green-100 text-green-800 border-green-200"
+                        }
+                      >
+                        {item.cezih_storno ? "Storniran" : "Poslan"}
+                      </Badge>
                     </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          )}
-        </CardContent>
-      </Card>
-
-      {/* e-Recept history */}
-      <Card>
-        <CardHeader className="flex flex-row items-center justify-between">
-          <div className="flex items-center gap-2">
-            <Pill className="h-4 w-4 text-muted-foreground" />
-            <CardTitle className="text-sm font-medium">e-Recept povijest</CardTitle>
-            <MockBadge />
-          </div>
-        </CardHeader>
-        <CardContent>
-          {!summary?.e_recept_history.length ? (
-            <p className="text-sm text-muted-foreground text-center py-4">
-              Nema poslanih e-Recepta za ovog pacijenta
-            </p>
-          ) : (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Datum</TableHead>
-                  <TableHead>ID recepta</TableHead>
-                  <TableHead>Lijekovi</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead className="text-right">Akcije</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {summary.e_recept_history.map((item) => {
-                  const isStorniran = (item as { status?: string }).status === "storniran"
-                  return (
-                    <TableRow key={item.recept_id}>
-                      <TableCell className="text-sm">{formatDateTimeHR(item.datum)}</TableCell>
-                      <TableCell className="font-mono text-xs">{item.recept_id}</TableCell>
-                      <TableCell className="text-sm max-w-[200px] truncate">
-                        {item.lijekovi.join(", ") || "—"}
-                      </TableCell>
-                      <TableCell>
-                        <Badge
-                          variant="outline"
-                          className={
-                            isStorniran
-                              ? "bg-red-100 text-red-800 border-red-200"
-                              : "bg-green-100 text-green-800 border-green-200"
-                          }
-                        >
-                          {isStorniran ? "Storniran" : "Aktivan"}
-                        </Badge>
-                      </TableCell>
-                      <TableCell className="text-right">
-                        {!isStorniran && (
+                    <TableCell className="text-right">
+                      {!item.cezih_storno && item.reference_id && (
+                        <div className="flex justify-end gap-1">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-8 w-8 p-0"
+                            onClick={() => setNalazReplaceTarget(item.reference_id)}
+                            title="Zamijeni e-Nalaz"
+                          >
+                            <RefreshCw className="h-3.5 w-3.5" />
+                          </Button>
                           <Button
                             variant="ghost"
                             size="sm"
                             className="h-8 w-8 p-0 text-destructive hover:text-destructive"
-                            onClick={() => setStornoTarget(item.recept_id)}
-                            title="Storno e-Recepta"
+                            onClick={() => setNalazStornoTarget(item.reference_id)}
+                            title="Storno e-Nalaza"
                           >
                             <Trash2 className="h-3.5 w-3.5" />
                           </Button>
-                        )}
-                      </TableCell>
-                    </TableRow>
-                  )
-                })}
+                        </div>
+                      )}
+                    </TableCell>
+                  </TableRow>
+                ))}
               </TableBody>
             </Table>
           )}
@@ -261,31 +227,51 @@ export function PatientCezihTab({ patientId, patientMbo }: PatientCezihTabProps)
         </>
       )}
 
-      <EReceptDialog
+      <PrescriptionForm
         open={eReceptOpen}
         onOpenChange={setEReceptOpen}
         patientId={patientId}
       />
 
-      {/* Storno confirmation dialog */}
+      {/* Storno e-Nalaz confirmation dialog */}
       <ConfirmDialog
-        open={!!stornoTarget}
-        onOpenChange={(open: boolean) => !open && setStornoTarget(null)}
-        title="Storno e-Recepta"
-        description={`Jeste li sigurni da želite stornirati e-Recept ${stornoTarget || ""}? Ova radnja se ne može poništiti.`}
-        confirmLabel="Storno"
+        open={!!nalazStornoTarget}
+        onOpenChange={(open: boolean) => !open && setNalazStornoTarget(null)}
+        title="Storno e-Nalaza"
+        description="Jeste li sigurni da želite stornirati ovaj e-Nalaz na CEZIH? Ova radnja se ne može poništiti."
+        confirmLabel="Storniraj"
         variant="destructive"
         onConfirm={() => {
-          if (!stornoTarget) return
-          cancelERecept.mutate(stornoTarget, {
+          if (!nalazStornoTarget) return
+          cancelDocument.mutate(nalazStornoTarget, {
             onSuccess: () => {
-              toast.success("e-Recept storniran")
-              setStornoTarget(null)
+              toast.success("e-Nalaz storniran")
+              setNalazStornoTarget(null)
             },
-            onError: (err) => toast.error(err.message || "Greška pri stornu e-Recepta"),
+            onError: (err) => toast.error(err.message || "Greška pri stornu e-Nalaza"),
           })
         }}
-        loading={cancelERecept.isPending}
+        loading={cancelDocument.isPending}
+      />
+
+      {/* Replace e-Nalaz confirmation dialog */}
+      <ConfirmDialog
+        open={!!nalazReplaceTarget}
+        onOpenChange={(open: boolean) => !open && setNalazReplaceTarget(null)}
+        title="Zamjena e-Nalaza"
+        description="Jeste li sigurni da želite zamijeniti ovaj dokument na CEZIH? Stari dokument će biti označen kao zamijenjen."
+        confirmLabel="Zamijeni"
+        onConfirm={() => {
+          if (!nalazReplaceTarget) return
+          replaceDocument.mutate(nalazReplaceTarget, {
+            onSuccess: () => {
+              toast.success("e-Nalaz zamijenjen")
+              setNalazReplaceTarget(null)
+            },
+            onError: (err) => toast.error(err.message || "Greška pri zamjeni e-Nalaza"),
+          })
+        }}
+        loading={replaceDocument.isPending}
       />
     </div>
   )

@@ -36,8 +36,8 @@ const procedureSchema = z.object({
   sifra: z.string().min(1, "Šifra je obavezna").max(20),
   naziv: z.string().min(1, "Naziv je obavezan").max(255),
   opis: z.string().optional(),
-  cijena_eur: z.number().min(0, "Cijena ne može biti negativna"),
-  trajanje_minuta: z.number().min(5).max(480),
+  cijena_eur: z.coerce.number({ message: "Cijena je obavezna" }).min(0, "Cijena ne može biti negativna"),
+  trajanje_minuta: z.coerce.number({ message: "Trajanje je obavezno" }).min(5, "Min 5 min").max(480, "Max 480 min"),
   kategorija: z.string().min(1, "Kategorija je obavezna"),
 })
 

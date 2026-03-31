@@ -15,12 +15,13 @@ import {
   SheetDescription,
 } from "@/components/ui/sheet"
 import { RECORD_TIP, RECORD_TIP_COLORS } from "@/lib/constants"
-import { formatDateHR, formatDateTimeHR } from "@/lib/utils"
+import { formatDateHR, formatDateTimeHR, formatCurrencyEUR } from "@/lib/utils"
 import { useSendENalaz, useEUputnice, useRetrieveEUputnice, useCancelDocument, useReplaceDocument } from "@/lib/hooks/use-cezih"
 import { usePermissions } from "@/lib/hooks/use-permissions"
+import { usePerformedProcedures } from "@/lib/hooks/use-procedures"
 import { MockBadge } from "@/components/cezih/mock-badge"
 import { ReferralLinkSelect } from "@/components/cezih/referral-link-select"
-import { EReceptDialog } from "@/components/cezih/e-recept-dialog"
+import { PrescriptionForm } from "@/components/prescriptions/prescription-form"
 import { ConfirmDialog } from "@/components/shared/confirm-dialog"
 import type { MedicalRecord } from "@/lib/types"
 
@@ -88,6 +89,11 @@ export function RecordDetail({ open, onOpenChange, record, patientId, onEdit }: 
     })
   }
 
+  const { data: linkedProcedures } = usePerformedProcedures(
+    undefined, undefined, undefined, undefined, record.id,
+  )
+  const linkedItems = linkedProcedures?.items ?? []
+
   const referrals = storedEUputnice?.items ?? []
 
   return (
@@ -136,6 +142,28 @@ export function RecordDetail({ open, onOpenChange, record, patientId, onEdit }: 
 
           <Separator />
 
+          {/* Povezani postupci */}
+          <div className="space-y-2">
+            <h4 className="text-sm font-medium text-muted-foreground">Povezani postupci</h4>
+            {linkedItems.length > 0 ? (
+              <div className="space-y-1">
+                {linkedItems.map((p) => (
+                  <div key={p.id} className="flex items-center justify-between rounded-md bg-muted px-3 py-2 text-sm">
+                    <span>
+                      <span className="font-mono text-xs text-muted-foreground">{p.procedure_sifra}</span>{" "}
+                      {p.procedure_naziv}
+                    </span>
+                    <span className="text-muted-foreground">{formatCurrencyEUR(p.cijena_cents / 100)}</span>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="text-sm text-muted-foreground">Nema povezanih postupaka</p>
+            )}
+          </div>
+
+          <Separator />
+
           {canPerformCezihOps && (
           <div className="space-y-2">
             <div className="flex items-center gap-2">
@@ -144,9 +172,15 @@ export function RecordDetail({ open, onOpenChange, record, patientId, onEdit }: 
             </div>
             {record.cezih_sent ? (
               <div className="space-y-2">
-                <Badge className="bg-green-100 text-green-800 border-green-200">
-                  Poslano na CEZIH
-                </Badge>
+                {record.cezih_storno ? (
+                  <Badge className="bg-red-100 text-red-800 border-red-200">
+                    Storniran na CEZIH
+                  </Badge>
+                ) : (
+                  <Badge className="bg-green-100 text-green-800 border-green-200">
+                    Poslano na CEZIH
+                  </Badge>
+                )}
                 {record.cezih_reference_id && (
                   <p className="text-xs text-muted-foreground">
                     Referenca: <span className="font-mono">{record.cezih_reference_id}</span>
@@ -157,7 +191,7 @@ export function RecordDetail({ open, onOpenChange, record, patientId, onEdit }: 
                     Vrijeme: {formatDateTimeHR(record.cezih_sent_at)}
                   </p>
                 )}
-                {record.cezih_reference_id && (
+                {record.cezih_reference_id && !record.cezih_storno && (
                   <div className="flex gap-2 pt-1">
                     <Button
                       variant="outline"
@@ -273,7 +307,7 @@ export function RecordDetail({ open, onOpenChange, record, patientId, onEdit }: 
         </div>
       </SheetContent>
 
-      <EReceptDialog
+      <PrescriptionForm
         open={eReceptOpen}
         onOpenChange={setEReceptOpen}
         patientId={patientId}
