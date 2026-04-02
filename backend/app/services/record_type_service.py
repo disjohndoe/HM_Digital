@@ -142,7 +142,7 @@ async def update_record_type(
 
     if record_type.is_system:
         update_data = data.model_dump(exclude_unset=True)
-        allowed = {"is_active", "color", "sort_order"}
+        allowed = {"is_active", "color", "sort_order", "label"}
         for key in update_data:
             if key not in allowed:
                 raise HTTPException(
