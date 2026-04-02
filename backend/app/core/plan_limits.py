@@ -12,7 +12,7 @@ class PlanLimits:
 PLAN_LIMITS: dict[str, PlanLimits] = {
     "trial": PlanLimits(
         max_users=1,
-        max_patients=50,
+        max_patients=None,  # Unlimited patients for trial
         max_concurrent_sessions=1,
         cezih_access=True,
     ),
