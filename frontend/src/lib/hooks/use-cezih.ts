@@ -156,6 +156,19 @@ export function useCezihDashboardStats() {
   return useQuery({
     queryKey: ["cezih", "dashboard-stats"],
     queryFn: () => api.get<CezihDashboardStats>("/cezih/dashboard-stats"),
+    staleTime: 30_000,
+    refetchOnWindowFocus: true,
+  })
+}
+
+/** Polling variant for sidebar badge — refetches every 30s */
+export function useCezihNalaziCount() {
+  return useQuery({
+    queryKey: ["cezih", "dashboard-stats"],
+    queryFn: () => api.get<CezihDashboardStats>("/cezih/dashboard-stats"),
+    select: (data) => data.neposlani_nalazi ?? 0,
+    staleTime: 15_000,
+    refetchInterval: 30_000,
   })
 }
 

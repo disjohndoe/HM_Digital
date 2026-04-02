@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect } from "react"
-import { useForm } from "react-hook-form"
+import { useForm, Controller } from "react-hook-form"
 import { standardSchemaResolver } from "@hookform/resolvers/standard-schema"
 import { z } from "zod"
 import { Save, Loader2 } from "lucide-react"
@@ -24,19 +24,30 @@ import { LoadingSpinner } from "@/components/shared/loading-spinner"
 import { useClinicSettings, useUpdateClinicSettings, usePlanUsage } from "@/lib/hooks/use-settings"
 import { TENANT_VRSTA_OPTIONS, PLAN_TIER, CEZIH_STATUS, CEZIH_STATUS_COLORS } from "@/lib/constants"
 
+const nullableString = z
+  .string()
+  .nullable()
+  .optional()
+  .transform((v) => (v === "" ? null : v))
+
 const clinicSchema = z.object({
   naziv: z.string().min(1, "Naziv je obavezan"),
   vrsta: z.string().min(1, "Vrsta je obavezna"),
   email: z.string().email("Neispravan email"),
-  telefon: z.string().nullable().optional(),
-  adresa: z.string().nullable().optional(),
-  oib: z.string().length(11, "OIB mora imati 11 znakova").nullable().optional(),
-  grad: z.string().nullable().optional(),
-  postanski_broj: z.string().nullable().optional(),
-  zupanija: z.string().nullable().optional(),
-  web: z.string().nullable().optional(),
-  sifra_ustanove: z.string().nullable().optional(),
-  oid: z.string().nullable().optional(),
+  telefon: nullableString,
+  adresa: nullableString,
+  oib: z
+    .string()
+    .length(11, "OIB mora imati 11 znakova")
+    .nullable()
+    .optional()
+    .transform((v) => (v === "" ? null : v)),
+  grad: nullableString,
+  postanski_broj: nullableString,
+  zupanija: nullableString,
+  web: nullableString,
+  sifra_ustanove: nullableString,
+  oid: nullableString,
   has_hzzo_contract: z.boolean().optional(),
 })
 
@@ -50,8 +61,7 @@ export default function KlinikaSettingsPage() {
   const {
     register,
     handleSubmit,
-    setValue,
-    watch,
+    control,
     reset,
     formState: { errors },
   } = useForm<ClinicFormData>({
@@ -114,21 +124,24 @@ export default function KlinikaSettingsPage() {
               </div>
               <div className="space-y-2">
                 <Label>Vrsta</Label>
-                <Select
-                  defaultValue={clinic?.vrsta ?? "ordinacija"}
-                  onValueChange={(v) => setValue("vrsta", v ?? "ordinacija")}
-                >
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {TENANT_VRSTA_OPTIONS.map((opt) => (
-                      <SelectItem key={opt.value} value={opt.value}>
-                        {opt.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <Controller
+                  name="vrsta"
+                  control={control}
+                  render={({ field }) => (
+                    <Select value={field.value ?? "ordinacija"} onValueChange={field.onChange}>
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {TENANT_VRSTA_OPTIONS.map((opt) => (
+                          <SelectItem key={opt.value} value={opt.value}>
+                            {opt.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  )}
+                />
               </div>
             </div>
 

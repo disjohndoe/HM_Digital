@@ -2,18 +2,20 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { AlertTriangle } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/lib/auth";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { PLAN_TIER, NAV_ITEMS } from "@/lib/constants";
-import { useCezihConnectionDisplay } from "@/lib/hooks/use-cezih";
+import { useCezihConnectionDisplay, useCezihNalaziCount } from "@/lib/hooks/use-cezih";
 import { usePermissions } from "@/lib/hooks/use-permissions";
 
 export function Sidebar() {
   const pathname = usePathname();
   const { tenant } = useAuth();
   const cezih = useCezihConnectionDisplay();
+  const { data: nalaziCount } = useCezihNalaziCount();
   const perms = usePermissions();
 
   return (
@@ -49,7 +51,10 @@ export function Sidebar() {
               )}
             >
               <item.icon className="h-4 w-4 shrink-0" />
-              {item.label}
+              <span className="flex-1">{item.label}</span>
+              {item.href === "/cezih-nalazi" && (nalaziCount ?? 0) > 0 && (
+                <AlertTriangle className="h-4 w-4 shrink-0 text-red-500" />
+              )}
             </Link>
           );
         })}
