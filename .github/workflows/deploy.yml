@@ -6,8 +6,33 @@ on:
       - main
 
 jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Validate backend syntax
+        run: python -m py_compile backend/app/main.py
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Validate frontend build
+        working-directory: frontend
+        run: |
+          npm ci
+          npx next build
+
   deploy:
     runs-on: ubuntu-latest
+    needs: validate
     steps:
       - name: Deploy to production
         uses: appleboy/ssh-action@v1
