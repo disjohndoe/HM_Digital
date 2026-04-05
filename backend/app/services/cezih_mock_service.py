@@ -1,3 +1,4 @@
+import base64
 import hashlib
 import json
 from datetime import UTC, datetime
@@ -122,6 +123,8 @@ async def mock_send_enalaz(
         "success": True,
         "reference_id": ref,
         "sent_at": now.isoformat(),
+        "signature_data": base64.b64encode(f"mock-signature-enalaz-{ref}".encode()).decode(),
+        "signed_at": now.isoformat(),
     }
 
 
@@ -182,7 +185,7 @@ def mock_cezih_status(tenant_id=None) -> dict:
     last_heartbeat = None
     if tenant_id:
         agent_connected = agent_manager.is_connected(tenant_id)
-        conn = agent_manager.get(tenant_id)
+        conn = agent_manager.get_any_connected(tenant_id)
         if conn:
             last_heartbeat = conn.last_heartbeat
 
@@ -607,9 +610,12 @@ async def mock_replace_document(
 ) -> dict:
     import os
     new_ref = f"MOCK-EN-R-{os.urandom(4).hex()}"
+    now = datetime.now(UTC)
     result = {
         "mock": True, "success": True,
         "new_reference_id": new_ref, "replaced_reference_id": original_reference_id,
+        "signature_data": base64.b64encode(f"mock-signature-replace-{new_ref}".encode()).decode(),
+        "signed_at": now.isoformat(),
     }
     if db and user_id and tenant_id:
         await _write_audit(

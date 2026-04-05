@@ -19,13 +19,12 @@ import asyncio
 import io
 import logging
 import re
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import httpx
 import openpyxl
 from sqlalchemy import func, select, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import async_session
 from app.models.drug_list import DrugListItem
@@ -252,7 +251,7 @@ async def sync_hzzo_drugs() -> dict:
 
     logger.info("HZZO sync: %d unique drug entries, upserting...", len(all_drugs))
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     upserted = 0
 
     async with async_session() as db:
@@ -343,7 +342,8 @@ async def _is_sync_fresh() -> bool:
         last_sync = result.scalar()
         if last_sync is None:
             return False
-        age = datetime.now(timezone.utc) - last_sync
+        # last_sync is a datetime from the DB, but mypy sees it as str
+        age = datetime.now(UTC) - last_sync  # type: ignore[operator]
         return age.days < 7
 
 

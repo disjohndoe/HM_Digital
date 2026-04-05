@@ -201,6 +201,8 @@ async def storno_prescription(
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Recept nije poslan — ne može se stornirati")
     if prescription.cezih_storno:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Recept je već storniran")
+    if not prescription.cezih_recept_id:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="CEZIH recept ID nije pronađen")
 
     cezih_result = await cezih.cancel_erecept(
         prescription.cezih_recept_id,
