@@ -50,7 +50,7 @@ export function DocumentSearch() {
   const [statusFilter, setStatusFilter] = useState<string>("")
   const [cancelTarget, setCancelTarget] = useState<string | null>(null)
 
-  const { data: documents, isLoading, refetch } = useDocumentSearch({
+  const { data: documents, isLoading, isError, error, refetch } = useDocumentSearch({
     mbo: selectedPatient?.mbo || undefined,
     type: docType || undefined,
     date_from: dateFrom || undefined,
@@ -193,6 +193,16 @@ export function DocumentSearch() {
         <Card>
           <CardContent className="flex items-center justify-center py-12">
             <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+          </CardContent>
+        </Card>
+      ) : isError ? (
+        <Card>
+          <CardContent className="py-6">
+            <div className="rounded-lg border border-destructive/50 bg-destructive/10 p-3">
+              <p className="text-sm text-destructive">
+                Greška pri pretrazi dokumenata: {(error as Error)?.message ?? "Nepoznata greška"}
+              </p>
+            </div>
           </CardContent>
         </Card>
       ) : !documents || documents.length === 0 ? (

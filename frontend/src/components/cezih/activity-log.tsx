@@ -60,7 +60,7 @@ function parseDetails(details: string | null): Record<string, string> | null {
 }
 
 export function CezihActivityLog() {
-  const { data, isLoading } = useCezihActivity(15)
+  const { data, isLoading, isError, error } = useCezihActivity(15)
 
   return (
     <Card>
@@ -83,6 +83,12 @@ export function CezihActivityLog() {
                 </div>
               </div>
             ))}
+          </div>
+        ) : isError ? (
+          <div className="rounded-lg border border-destructive/50 bg-destructive/10 p-3">
+            <p className="text-sm text-destructive">
+              Greška pri dohvatu aktivnosti: {(error as Error)?.message ?? "Nepoznata greška"}
+            </p>
           </div>
         ) : !data?.items.length ? (
           <p className="text-sm text-muted-foreground text-center py-6">

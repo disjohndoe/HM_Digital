@@ -204,6 +204,12 @@ export function CaseManagement({ patientId, patientMbo }: CaseManagementProps) {
           <div className="flex justify-center py-4">
             <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
           </div>
+        ) : casesQuery.isError ? (
+          <div className="rounded-lg border border-destructive/50 bg-destructive/10 p-3">
+            <p className="text-sm text-destructive">
+              Greška pri dohvatu slučajeva: {(casesQuery.error as Error)?.message ?? "Nepoznata greška"}
+            </p>
+          </div>
         ) : cases.length === 0 ? (
           <p className="text-sm text-muted-foreground text-center py-4">
             {patientMbo

@@ -40,6 +40,7 @@ export function SendNalazDialog({ open, onOpenChange, patientId }: SendNalazDial
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
   const [sending, setSending] = useState(false)
   const [progress, setProgress] = useState({ current: 0, total: 0 })
+  const [failedRecords, setFailedRecords] = useState<{ id: string; error: string }[]>([])
 
   const { data } = useMedicalRecords(patientId)
   const sendENalaz = useSendENalaz()
@@ -55,6 +56,7 @@ export function SendNalazDialog({ open, onOpenChange, patientId }: SendNalazDial
     if (open) {
       setSelectedIds(new Set(eligibleRecords.map((r) => r.id)))
       setProgress({ current: 0, total: 0 })
+      setFailedRecords([])
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open])
@@ -82,7 +84,9 @@ export function SendNalazDialog({ open, onOpenChange, patientId }: SendNalazDial
 
     setSending(true)
     setProgress({ current: 0, total: ids.length })
+    setFailedRecords([])
     let successCount = 0
+    const failed: { id: string; error: string }[] = []
 
     for (let i = 0; i < ids.length; i++) {
       setProgress({ current: i + 1, total: ids.length })
@@ -92,20 +96,31 @@ export function SendNalazDialog({ open, onOpenChange, patientId }: SendNalazDial
           record_id: ids[i],
         })
         successCount++
-      } catch {
-        // continue sending remaining records
+      } catch (err) {
+        failed.push({
+          id: ids[i],
+          error: err instanceof Error ? err.message : "Nepoznata greška",
+        })
       }
     }
 
     setSending(false)
+    setFailedRecords(failed)
+
     if (successCount > 0) {
       toast.success(`${successCount} nalaz${successCount === 1 ? "" : "a"} poslan${successCount === 1 ? "" : "o"} na CEZIH`)
     }
-    if (successCount < ids.length) {
-      toast.error(`${ids.length - successCount} nalaz${ids.length - successCount === 1 ? "" : "a"} nije uspjelo poslati`)
+    if (failed.length > 0) {
+      toast.error(
+        `${failed.length} nalaz${failed.length === 1 ? "" : "a"} nije uspjelo poslati: ${failed.map((f) => f.error).join("; ")}`,
+      )
     }
-    setSelectedIds(new Set())
-    onOpenChange(false)
+
+    if (failed.length === 0) {
+      setSelectedIds(new Set())
+      onOpenChange(false)
+    }
+    // Keep dialog open on partial failure so user can see which records failed
   }, [selectedIds, patientId, sendENalaz, onOpenChange])
 
   const allSelected = eligibleRecords.length > 0 && selectedIds.size === eligibleRecords.length
@@ -185,6 +200,23 @@ export function SendNalazDialog({ open, onOpenChange, patientId }: SendNalazDial
             <div className="flex items-center gap-2 text-sm text-muted-foreground">
               <Loader2 className="h-4 w-4 animate-spin" />
               <span>Slanje {progress.current}/{progress.total}...</span>
+            </div>
+          )}
+
+          {/* Failed records */}
+          {failedRecords.length > 0 && !sending && (
+            <div className="rounded-lg border border-destructive/50 bg-destructive/10 p-3 space-y-1">
+              <p className="text-sm font-medium text-destructive">
+                {failedRecords.length} nalaz{failedRecords.length === 1 ? "" : "a"} nije uspjelo poslati:
+              </p>
+              {failedRecords.map((f) => {
+                const record = eligibleRecords.find((r) => r.id === f.id)
+                return (
+                  <p key={f.id} className="text-xs text-destructive/80">
+                    {record ? `${tipLabelMap[record.tip] || record.tip} (${formatDateHR(record.datum)})` : f.id}: {f.error}
+                  </p>
+                )
+              })}
             </div>
           )}
         </div>

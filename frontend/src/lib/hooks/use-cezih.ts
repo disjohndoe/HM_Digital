@@ -43,28 +43,31 @@ export function useCezihStatus() {
  * the current fallback (logged-in user + tenant name).
  */
 export function useCezihConnectionDisplay() {
-  const { data, isLoading } = useCezihStatus()
+  const { data, isLoading, isError, error } = useCezihStatus()
 
-  const isConnected = data?.connected || data?.mock
-  const isDemo = data ? !data.connected && data.mock : false
-  const dotColor = isConnected ? "bg-green-500" : "bg-muted-foreground/50"
+  const isConnected = data?.connected === true
+  const isDemo = data?.mock === true
+  const dotColor = isConnected
+    ? "bg-green-500"
+    : isDemo
+      ? "bg-yellow-500"
+      : "bg-muted-foreground/50"
 
   let label = "Nije povezano"
-  if (data?.connected) {
+  if (isConnected) {
     label = "Povezano"
-  } else if (data?.mock) {
-    label = "Povezano"
+  } else if (isDemo) {
+    label = "Demo način"
   }
-
-  const suffix = isDemo ? " (DEMO)" : ""
-  const fullLabel = `${label}${suffix}`
 
   return {
     isLoading,
+    isError,
+    error,
     isConnected,
     isDemo,
     dotColor,
-    label: fullLabel,
+    label,
     connectedDoctor: data?.connected_doctor ?? null,
     connectedClinic: data?.connected_clinic ?? null,
     raw: data,

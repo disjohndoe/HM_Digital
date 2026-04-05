@@ -36,7 +36,7 @@ function CheckIcon({ checked }: { checked: boolean }) {
 
 export default function CezihNalaziPage() {
   const { canPerformCezihOps } = usePermissions()
-  const { data, isLoading } = useCezihUnsentRecords()
+  const { data, isLoading, isError, error } = useCezihUnsentRecords()
   const sendENalaz = useSendENalaz()
   const { tipLabelMap, tipColorMap, isCezihMandatory } = useRecordTypeMaps()
 
@@ -48,6 +48,7 @@ export default function CezihNalaziPage() {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
   const [sending, setSending] = useState(false)
   const [progress, setProgress] = useState({ current: 0, total: 0 })
+  const [failedRecords, setFailedRecords] = useState<{ id: string; error: string }[]>([])
 
   // Pre-select all when records load
   useEffect(() => {
@@ -78,7 +79,9 @@ export default function CezihNalaziPage() {
 
     setSending(true)
     setProgress({ current: 0, total: toSend.length })
+    setFailedRecords([])
     let successCount = 0
+    const failed: { id: string; error: string }[] = []
 
     for (let i = 0; i < toSend.length; i++) {
       setProgress({ current: i + 1, total: toSend.length })
@@ -88,17 +91,24 @@ export default function CezihNalaziPage() {
           record_id: toSend[i].id,
         })
         successCount++
-      } catch {
-        // continue sending remaining
+      } catch (err) {
+        failed.push({
+          id: toSend[i].id,
+          error: err instanceof Error ? err.message : "Nepoznata greška",
+        })
       }
     }
 
     setSending(false)
+    setFailedRecords(failed)
+
     if (successCount > 0) {
       toast.success(`${successCount} nalaz${successCount === 1 ? "" : "a"} poslan${successCount === 1 ? "" : "o"} na CEZIH`)
     }
-    if (successCount < toSend.length) {
-      toast.error(`${toSend.length - successCount} nalaz${toSend.length - successCount === 1 ? "" : "a"} nije uspjelo poslati`)
+    if (failed.length > 0) {
+      toast.error(
+        `${failed.length} nalaz${failed.length === 1 ? "" : "a"} nije uspjelo poslati: ${failed.map((f) => f.error).join("; ")}`,
+      )
     }
     setSelectedIds(new Set())
   }, [selectedIds, records, sendENalaz])
@@ -120,8 +130,33 @@ export default function CezihNalaziPage() {
         <MockBadge />
       </PageHeader>
 
+      {/* Failed records banner */}
+      {failedRecords.length > 0 && !sending && (
+        <div className="rounded-lg border border-destructive/50 bg-destructive/10 p-4 space-y-1">
+          <p className="text-sm font-medium text-destructive">
+            {failedRecords.length} nalaz{failedRecords.length === 1 ? "" : "a"} nije uspjelo poslati:
+          </p>
+          {failedRecords.map((f) => {
+            const record = records.find((r) => r.id === f.id)
+            return (
+              <p key={f.id} className="text-xs text-destructive/80">
+                {record
+                  ? `${record.patient_ime} ${record.patient_prezime} — ${tipLabelMap[record.tip] || record.tip} (${formatDateHR(record.datum)})`
+                  : f.id}: {f.error}
+              </p>
+            )
+          })}
+        </div>
+      )}
+
       {isLoading ? (
         <LoadingSpinner text="Učitavanje..." />
+      ) : isError ? (
+        <div className="rounded-lg border border-destructive/50 bg-destructive/10 p-4">
+          <p className="text-sm text-destructive">
+            Greška pri dohvatu neposlanih nalaza: {(error as Error)?.message ?? "Nepoznata greška"}
+          </p>
+        </div>
       ) : records.length === 0 ? (
         <div className="flex flex-col items-center gap-3 rounded-lg border border-dashed py-16">
           <AlertTriangle className="h-8 w-8 text-muted-foreground" />
@@ -178,10 +213,12 @@ export default function CezihNalaziPage() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {records.map((r) => (
+              {records.map((r) => {
+                const isFailed = failedRecords.some((f) => f.id === r.id)
+                return (
                 <TableRow
                   key={r.id}
-                  className={`cursor-pointer ${selectedIds.has(r.id) ? "bg-primary/5" : ""}`}
+                  className={`cursor-pointer ${isFailed ? "bg-destructive/5 border-l-2 border-l-destructive" : selectedIds.has(r.id) ? "bg-primary/5" : ""}`}
                   onClick={() => !sending && toggleRecord(r.id)}
                 >
                   <TableCell>
@@ -218,7 +255,8 @@ export default function CezihNalaziPage() {
                       : "—"}
                   </TableCell>
                 </TableRow>
-              ))}
+                )
+              })}
             </TableBody>
           </Table>
         </>
