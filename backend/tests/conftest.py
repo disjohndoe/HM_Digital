@@ -1,4 +1,3 @@
-import asyncio
 from collections.abc import AsyncGenerator
 
 import pytest
@@ -11,45 +10,53 @@ from app.models.base import Base
 
 TEST_DATABASE_URL = "postgresql+asyncpg://postgres:postgres@localhost:5433/medical_mvp_test"
 
-engine = create_async_engine(TEST_DATABASE_URL, echo=False)
-TestSessionFactory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+_engine = None
+_session_factory = None
 
 
-@pytest.fixture(scope="session")
-def event_loop():
-    loop = asyncio.new_event_loop()
-    yield loop
-    loop.close()
+async def _get_engine():
+    global _engine, _session_factory
+    if _engine is None:
+        _engine = create_async_engine(TEST_DATABASE_URL, echo=False)
+        _session_factory = async_sessionmaker(_engine, class_=AsyncSession, expire_on_commit=False)
+    return _engine
 
 
 @pytest.fixture(scope="session", autouse=True)
 async def setup_database():
+    engine = await _get_engine()
     async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.drop_all)
         await conn.run_sync(Base.metadata.create_all)
-    yield
+    yield engine
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.drop_all)
     await engine.dispose()
 
 
 @pytest.fixture
-async def db_session() -> AsyncGenerator[AsyncSession, None]:
-    async with TestSessionFactory() as session:
-        async with session.begin():
-            yield session
-            await session.rollback()
+async def client(setup_database) -> AsyncGenerator[AsyncClient, None]:
+    """Test client that uses the test database with per-request sessions."""
 
-
-@pytest.fixture
-async def client(db_session: AsyncSession) -> AsyncGenerator[AsyncClient, None]:
     async def override_get_db():
-        yield db_session
+        async with _session_factory() as session:
+            yield session
 
     app.dependency_overrides[get_db] = override_get_db
+    # Disable rate limiting for tests
+    app.state.limiter.enabled = False
     transport = ASGITransport(app=app)  # type: ignore[arg-type]
     async with AsyncClient(transport=transport, base_url="http://test") as ac:
         yield ac
     app.dependency_overrides.clear()
+    app.state.limiter.enabled = True
+
+
+@pytest.fixture
+async def db_session(setup_database) -> AsyncGenerator[AsyncSession, None]:
+    """Direct DB session for tests that need to query/modify data directly."""
+    async with _session_factory() as session:
+        yield session
 
 
 @pytest.fixture
@@ -69,18 +76,7 @@ async def auth_headers(client: AsyncClient) -> dict[str, str]:
 
 @pytest.fixture
 async def auth_headers_doctor(client: AsyncClient, auth_headers: dict[str, str]) -> dict[str, str]:
-    """Create a doctor user in the same tenant and return auth headers."""
-    # First get the admin's tenant info
-    me_resp = await client.get("/api/auth/me", headers=auth_headers)
-    me_data = me_resp.json()
-    me_data["tenant_id"]
-
-    # Create doctor via the users API (admin can create users)
-    # Actually, we need to use the user creation endpoint. Let's register another tenant
-    # and create a doctor. Simpler approach: register a second user as a separate tenant
-    # then we need cross-tenant isolation anyway.
-    # Best approach: directly use the users endpoint to create a doctor in same tenant.
-    # But that may require specific endpoint. Let's just register a second clinic as doctor.
+    """Create a doctor user in a separate tenant and return auth headers."""
     doctor_payload = {
         "naziv_klinike": "Doctor Clinic",
         "email": "doctor@test.hr",

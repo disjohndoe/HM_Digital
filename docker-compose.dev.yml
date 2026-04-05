@@ -20,6 +20,7 @@ services:
       DATABASE_URL: postgresql+asyncpg://postgres:${DB_PASSWORD:-postgres}@db:5432/medical_mvp
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000}
       JWT_SECRET_KEY: ${JWT_SECRET_KEY:?Set JWT_SECRET_KEY in .env or shell environment}
+      RATE_LIMIT_ENABLED: ${RATE_LIMIT_ENABLED:-true}
     volumes:
       - ./backend:/app
 
