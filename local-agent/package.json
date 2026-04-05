@@ -5,13 +5,16 @@
   "scripts": {
     "tauri": "tauri",
     "dev": "tauri dev",
-    "build": "cp index.html dist/ && cp app.js dist/ && tauri build"
+    "build:frontend": "node -e \"const fs=require('fs');fs.mkdirSync('dist',{recursive:true});fs.copyFileSync('index.html','dist/index.html');fs.copyFileSync('app.js','dist/app.js');\"",
+    "build": "pnpm run build:frontend && tauri build"
   },
   "packageManager": "pnpm@10.28.0",
   "devDependencies": {
     "@tauri-apps/cli": "^2.10.1"
   },
   "dependencies": {
-    "@tauri-apps/api": "^2.10.1"
+    "@tauri-apps/api": "^2.10.1",
+    "@tauri-apps/plugin-process": "^2.3.1",
+    "@tauri-apps/plugin-updater": "^2.10.1"
   }
 }
