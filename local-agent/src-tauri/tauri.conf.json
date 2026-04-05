@@ -1,7 +1,7 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "HM Digital Agent",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "identifier": "hr.hmdigital.medical",
   "build": {
     "frontendDist": "../dist"
@@ -17,6 +17,7 @@
         "fullscreen": false
       }
     ],
+    "withGlobalTauri": true,
     "security": {
       "csp": "default-src 'self'; connect-src ws://localhost:8000 wss://* http://localhost:8000 https://*"
     },
@@ -28,6 +29,7 @@
   "bundle": {
     "active": true,
     "targets": ["nsis"],
+    "createUpdaterArtifacts": true,
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
@@ -35,5 +37,16 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ]
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IERBNzA0NkQwRDU2OTBCRDQKUldUVUMyblYwRVp3Mm41ODh5N0pIRWhyVFowbWtSV2EzaENXYzcrZGdMQUdMTlRoYjR5RCs1Mm8K",
+      "endpoints": [
+        "https://github.com/disjohndoe/agent/releases/latest/download/latest.json"
+      ],
+      "windows": {
+        "installMode": "passive"
+      }
+    }
   }
 }

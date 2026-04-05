@@ -1,6 +1,6 @@
 [package]
 name = "hm-digital-agent"
-version = "0.1.0"
+version = "0.1.1"
 description = "HM Digital Local Agent — CEZIH smart card + VPN bridge"
 authors = ["HM Digital"]
 license = "proprietary"
@@ -12,7 +12,7 @@ name = "app_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]
-tauri-build = { version = "2.5.6" }
+tauri-build = { version = "2.5.6", features = [] }
 
 [dependencies]
 serde = { version = "1.0", features = ["derive"] }
@@ -25,3 +25,8 @@ tokio = { version = "1", features = ["full"] }
 tokio-tungstenite = { version = "0.26", features = ["native-tls"] }
 futures-util = "0.3"
 uuid = { version = "1", features = ["v4"] }
+pcsc = "2"
+
+[target."cfg(not(any(target_os = \"android\", target_os = \"ios\")))".dependencies]
+tauri-plugin-updater = "2"
+tauri-plugin-process = "2"

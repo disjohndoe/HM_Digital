@@ -1,0 +1,137 @@
+name: Release Agent
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'local-agent/**'
+  workflow_dispatch:
+
+jobs:
+  check-version-changed:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      changed: ${{ steps.version.outputs.changed }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Check if agent version changed
+        id: version
+        run: |
+          CONFIG_VERSION=$(jq -r .version local-agent/src-tauri/tauri.conf.json)
+          CARGO_VERSION=$(grep '^version' local-agent/src-tauri/Cargo.toml | head -1 | cut -d'"' -f2)
+
+          echo "config=$CONFIG_VERSION cargo=$CARGO_VERSION"
+
+          if [ "$CONFIG_VERSION" != "$CARGO_VERSION" ]; then
+            echo "ERROR: tauri.conf.json ($CONFIG_VERSION) != Cargo.toml ($CARGO_VERSION)"
+            exit 1
+          fi
+
+          # Check if version changed from previous commit
+          git diff HEAD~1 HEAD -- local-agent/src-tauri/tauri.conf.json | grep -q '"version"' && CHANGED="true" || CHANGED="false"
+
+          echo "changed=$CHANGED" >> "$GITHUB_OUTPUT"
+          echo "version=$CONFIG_VERSION" >> "$GITHUB_OUTPUT"
+
+  build-and-release:
+    needs: check-version-changed
+    if: needs.check-version-changed.outputs.changed == 'true'
+    permissions:
+      contents: write
+    runs-on: windows-latest
+    env:
+      VERSION: ${{ needs.check-version-changed.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: lts/*
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: 'local-agent/src-tauri -> target'
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - name: Install frontend dependencies
+        working-directory: local-agent
+        run: pnpm install
+
+      - name: Build Tauri app
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          projectPath: local-agent
+          tagName: agent-v__VERSION__
+          releaseName: 'HM Digital Agent v__VERSION__'
+          releaseBody: 'Auto-generated release for HM Digital Agent v__VERSION__.'
+          releaseDraft: true
+          prerelease: false
+          updaterJsonPreferNsis: true
+
+      - name: Publish release to disjohndoe/agent
+        env:
+          GH_TOKEN: ${{ secrets.AGENT_RELEASE_TOKEN }}
+        shell: bash
+        run: |
+          TAG="agent-v${VERSION}"
+
+          # Find built artifacts
+          BUNDLE_DIR="local-agent/src-tauri/target/release/bundle"
+          NSIS_DIR="${BUNDLE_DIR}/nsis"
+
+          # Locate the installer and sig files
+          INSTALLER=$(find "$NSIS_DIR" -name "*.exe" | head -1)
+          SIG_FILE=$(find "$NSIS_DIR" -name "*.exe.sig" | head -1)
+
+          # Get latest.json from the draft release on this repo
+          DRAFT_TAG="${TAG}"
+          LATEST_JSON_URL=$(gh release view "$DRAFT_TAG" --json assets --jq '.assets[] | select(.name == "latest.json") | .url')
+
+          # Download latest.json
+          if [ -n "$LATEST_JSON_URL" ]; then
+            gh release download "$DRAFT_TAG" --pattern "latest.json" --dir /tmp
+            LATEST_JSON="/tmp/latest.json"
+          fi
+
+          # Create release on the public agent repo
+          RELEASE_NOTES="Auto-generated release for HM Digital Agent v${VERSION}."
+
+          gh release create "$TAG" \
+            --repo disjohndoe/agent \
+            --title "HM Digital Agent v${VERSION}" \
+            --notes "$RELEASE_NOTES" \
+            --latest
+
+          # Upload artifacts
+          gh release upload "$TAG" --repo disjohndoe/agent "$INSTALLER"
+          [ -n "$SIG_FILE" ] && gh release upload "$TAG" --repo disjohndoe/agent "$SIG_FILE"
+          [ -f "$LATEST_JSON" ] && gh release upload "$TAG" --repo disjohndoe/agent "$LATEST_JSON"
+
+          echo "✅ Published to disjohndoe/agent"
+
+      - name: Delete draft release from source repo
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          TAG="agent-v${VERSION}"
+          gh release delete "$TAG" --repo disjohndoe/HM_Digital --yes 2>/dev/null || true
+          git push --delete origin "$TAG" 2>/dev/null || true
