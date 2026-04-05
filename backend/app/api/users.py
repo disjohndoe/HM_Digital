@@ -180,15 +180,14 @@ async def auto_bind_card(
     if not user or user.tenant_id != current_user.tenant_id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Korisnik nije pronadjen")
 
-    conn = agent_manager.get(current_user.tenant_id)
-    if not conn:
+    # Find any agent that has a card inserted
+    agents = agent_manager.get_all(current_user.tenant_id)
+    if not agents:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Agent nije spojen")
 
-    if not conn.card_inserted:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Kartica nije umetnuta u čitač")
-
-    if not conn.card_holder:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Kartica nema podatke o nositelju")
+    conn = next((a for a in agents if a.card_inserted and a.card_holder), None)
+    if not conn:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Kartica nije umetnuta ni u jednom agentu")
 
     user.card_holder_name = conn.card_holder
     await db.flush()

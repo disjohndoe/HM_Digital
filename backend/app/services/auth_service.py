@@ -96,7 +96,11 @@ async def login(db: AsyncSession, email: str, password: str) -> TokenResponse:
         if datetime.now(UTC) >= tenant.trial_expires_at:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail="Vaše pokusno razdoblje je isteklo. Obratite nam se na 097/7120-800 ili medical@hmdigital.hr radi produljenja Vašeg plana.",
+                detail=(
+                    "Vaše pokusno razdoblje je isteklo. "
+                    "Obratite nam se na 097/7120-800 ili "
+                    "medical@hmdigital.hr radi produljenja Vašeg plana."
+                ),
             )
 
     # Update last login
@@ -191,7 +195,11 @@ async def refresh(db: AsyncSession, raw_token: str) -> TokenResponse:
         if datetime.now(UTC) >= tenant.trial_expires_at:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail="Vaše pokusno razdoblje je isteklo. Obratite nam se na 097/7120-800 ili medical@hmdigital.hr radi produljenja Vašeg plana.",
+                detail=(
+                    "Vaše pokusno razdoblje je isteklo. "
+                    "Obratite nam se na 097/7120-800 ili "
+                    "medical@hmdigital.hr radi produljenja Vašeg plana."
+                ),
             )
 
     if tenant and user.role != "admin":

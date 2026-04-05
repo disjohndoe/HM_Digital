@@ -73,7 +73,11 @@ class Settings(BaseSettings):
 def get_settings() -> Settings:
     s = Settings()
     if s.is_production and s.JWT_SECRET_KEY == _INSECURE_JWT_DEFAULT:
-        print("FATAL: JWT_SECRET_KEY must be changed in production. Generate one with: openssl rand -hex 32", file=sys.stderr)
+        print(
+            "FATAL: JWT_SECRET_KEY must be changed in production. "
+            "Generate one with: openssl rand -hex 32",
+            file=sys.stderr,
+        )
         sys.exit(1)
     return s
 

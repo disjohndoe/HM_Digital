@@ -3,7 +3,6 @@ from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
@@ -22,6 +21,7 @@ class CezihStatusResponse(BaseModel):
     sifra_ustanove: str | None
     oid: str | None
     agent_connected: bool
+    agents_count: int = 0
     last_heartbeat: datetime | None
 
 
@@ -56,13 +56,20 @@ async def get_cezih_status(
     tenant = await db.get(Tenant, current_user.tenant_id)
     if not tenant:
         raise HTTPException(status_code=404, detail="Klinika nije pronađena")
-    conn = agent_manager.get(current_user.tenant_id)
+    # Use the most recent heartbeat from any connected agent
+    conn = agent_manager.get_any_connected(current_user.tenant_id)
+    all_conns = agent_manager.get_all(current_user.tenant_id)
+    latest_heartbeat = None
+    for c in all_conns:
+        if c.last_heartbeat and (latest_heartbeat is None or c.last_heartbeat > latest_heartbeat):
+            latest_heartbeat = c.last_heartbeat
     return CezihStatusResponse(
         status=tenant.cezih_status,
         sifra_ustanove=tenant.sifra_ustanove,
         oid=tenant.oid,
-        agent_connected=agent_manager.is_connected(current_user.tenant_id),
-        last_heartbeat=conn.last_heartbeat if conn else None,
+        agent_connected=conn is not None,
+        agents_count=len(all_conns),
+        last_heartbeat=latest_heartbeat,
     )
 
 
@@ -86,6 +93,7 @@ async def generate_agent_secret(
 
 class CardStatusResponse(BaseModel):
     agent_connected: bool
+    agents_count: int = 0
     card_inserted: bool
     card_holder: str | None
     vpn_connected: bool
@@ -98,24 +106,13 @@ async def get_card_status_endpoint(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Get current smart card and agent status, with matched doctor if card is inserted."""
-    status_data = get_card_status(current_user.tenant_id)
+    """Get current smart card and agent status scoped to the calling user."""
+    status_data = get_card_status(current_user.tenant_id, current_user.card_holder_name)
     result = CardStatusResponse(**status_data)
 
-    # Try to match inserted card to a doctor
+    # If this user's card is inserted, set matched doctor to self
     if status_data["card_inserted"] and status_data["card_holder"]:
-        card_name = status_data["card_holder"].strip().upper()
-        doctors = await db.execute(
-            select(User).where(
-                User.tenant_id == current_user.tenant_id,
-                User.is_active.is_(True),
-                User.card_holder_name.isnot(None),
-            )
-        )
-        for doctor in doctors.scalars().all():
-            if doctor.card_holder_name and doctor.card_holder_name.strip().upper() == card_name:
-                result.matched_doctor_id = str(doctor.id)
-                result.matched_doctor_name = f"{doctor.titula or ''} {doctor.ime} {doctor.prezime}".strip()
-                break
+        result.matched_doctor_id = str(current_user.id)
+        result.matched_doctor_name = f"{current_user.titula or ''} {current_user.ime} {current_user.prezime}".strip()
 
     return result

@@ -207,6 +207,8 @@ async def get_patient_cezih_summary(
             reference_id=r.cezih_reference_id,
             cezih_sent_at=r.cezih_sent_at,
             cezih_storno=r.cezih_storno,
+            cezih_signed=bool(r.cezih_signature_data),
+            cezih_signed_at=r.cezih_signed_at,
         )
         for r in records
     ]
@@ -314,7 +316,7 @@ async def search_drugs(
     q: str = Query("", min_length=0),
     current_user: User = Depends(get_current_user),
 ):
-    return await cezih.drug_search(q)
+    return cezih.drug_search(q)
 
 
 @router.post("/lijekovi/sync")
@@ -580,6 +582,7 @@ async def replace_document(
     await check_cezih_access(db, current_user.tenant_id)
     return await cezih.dispatch_replace_document(
         reference_id,
+        record_id=data.record_id if data else None,
         db=db, user_id=current_user.id, tenant_id=current_user.tenant_id,
         http_client=_http_client(request),
     )

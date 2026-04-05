@@ -8,6 +8,7 @@ from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 
 from app.api.agent_ws import router as agent_ws_router
+from app.api.auth import limiter
 from app.api.router import api_router
 from app.config import settings
 from app.middleware.error_handler import ErrorHandlerMiddleware
@@ -37,10 +38,8 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-from app.api.auth import limiter
-
 app.state.limiter = limiter
-app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+app.add_exception_handler(RateLimitExceeded, lambda r, e: _rate_limit_exceeded_handler(r, e))  # type: ignore[arg-type]
 
 app.add_middleware(RequestLoggerMiddleware)
 app.add_middleware(ErrorHandlerMiddleware)
@@ -50,6 +49,7 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allow_headers=["Content-Type", "Authorization"],
+    expose_headers=["Content-Disposition"],
 )
 
 app.include_router(api_router, prefix="/api")
