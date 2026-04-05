@@ -164,7 +164,12 @@ def test_parse_message_response_success():
     response = {
         "entry": [
             {"resource": {"resourceType": "MessageHeader", "response": {"code": "ok"}}},
-            {"resource": {"resourceType": "Condition", "identifier": [{"system": ID_CASE_GLOBAL, "value": "new-case-id"}]}},
+            {
+                "resource": {
+                    "resourceType": "Condition",
+                    "identifier": [{"system": ID_CASE_GLOBAL, "value": "new-case-id"}],
+                }
+            },
         ]
     }
     result = parse_message_response(response)

@@ -19,6 +19,7 @@ class RequestLoggerMiddleware(BaseHTTPMiddleware):
         response: Response = await call_next(request)
         duration_ms = (time.perf_counter() - start) * 1000
 
+        # Log path only — never log query params (may contain patient_id, MBO, etc.)
         logger.info(
             "%s %s → %d (%.1fms)",
             request.method,

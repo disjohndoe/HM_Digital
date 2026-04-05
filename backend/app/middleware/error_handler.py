@@ -5,6 +5,8 @@ from fastapi import Request
 from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 
+from app.config import settings
+
 logger = logging.getLogger("app.error_handler")
 
 
@@ -13,7 +15,11 @@ class ErrorHandlerMiddleware(BaseHTTPMiddleware):
         try:
             return await call_next(request)
         except Exception:
-            logger.error("Unhandled exception on %s %s:\n%s", request.method, request.url.path, traceback.format_exc())
+            # In production, log minimal info — full traces only in development
+            if settings.is_production:
+                logger.error("Unhandled exception on %s %s", request.method, request.url.path)
+            else:
+                logger.error("Unhandled exception on %s %s:\n%s", request.method, request.url.path, traceback.format_exc())
             return JSONResponse(
                 status_code=500,
                 content={"detail": "Dogodila se neočekivana greška."},
