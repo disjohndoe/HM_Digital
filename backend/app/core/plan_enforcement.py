@@ -11,6 +11,20 @@ from app.models.tenant import Tenant
 from app.models.user import User
 
 
+def check_trial_expiry(tenant: Tenant) -> None:
+    """Raise 403 if tenant is on trial and the trial has expired."""
+    if tenant.plan_tier == "trial" and tenant.trial_expires_at:
+        if datetime.now(UTC) >= tenant.trial_expires_at:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=(
+                    "Vaše pokusno razdoblje je isteklo. "
+                    "Obratite nam se na 097/7120-800 ili "
+                    "medical@hmdigital.hr radi produljenja Vašeg plana."
+                ),
+            )
+
+
 async def _get_tenant(db: AsyncSession, tenant_id) -> Tenant:
     tenant = await db.get(Tenant, tenant_id)
     if not tenant:
@@ -111,8 +125,8 @@ async def get_current_usage(db: AsyncSession, tenant_id) -> dict:
 
     trial_days_remaining = None
     if tenant.plan_tier == "trial" and tenant.trial_expires_at:
-        remaining = (tenant.trial_expires_at - datetime.now(UTC)).days
-        trial_days_remaining = max(0, remaining)
+        remaining_seconds = (tenant.trial_expires_at - datetime.now(UTC)).total_seconds()
+        trial_days_remaining = max(0, remaining_seconds / 86400)
 
     return {
         "plan_tier": tenant.plan_tier,

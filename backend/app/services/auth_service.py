@@ -9,6 +9,7 @@ from sqlalchemy import delete, func, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
+from app.core.plan_enforcement import check_trial_expiry
 from app.core.plan_limits import get_plan_limits
 from app.models.refresh_token import RefreshToken
 from app.models.tenant import Tenant
@@ -113,16 +114,7 @@ async def login(db: AsyncSession, email: str, password: str) -> TokenResponse:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Klinika je deaktivirana")
 
     # Check trial expiry
-    if tenant.plan_tier == "trial" and tenant.trial_expires_at:
-        if datetime.now(UTC) >= tenant.trial_expires_at:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail=(
-                    "Vaše pokusno razdoblje je isteklo. "
-                    "Obratite nam se na 097/7120-800 ili "
-                    "medical@hmdigital.hr radi produljenja Vašeg plana."
-                ),
-            )
+    check_trial_expiry(tenant)
 
     # Update last login
     user.last_login_at = datetime.now(UTC)
@@ -212,16 +204,8 @@ async def refresh(db: AsyncSession, raw_token: str) -> TokenResponse:
     tenant = await db.get(Tenant, user.tenant_id)
 
     # Check trial expiry on refresh
-    if tenant and tenant.plan_tier == "trial" and tenant.trial_expires_at:
-        if datetime.now(UTC) >= tenant.trial_expires_at:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail=(
-                    "Vaše pokusno razdoblje je isteklo. "
-                    "Obratite nam se na 097/7120-800 ili "
-                    "medical@hmdigital.hr radi produljenja Vašeg plana."
-                ),
-            )
+    if tenant:
+        check_trial_expiry(tenant)
 
     if tenant and user.role != "admin":
         limits = get_plan_limits(tenant.plan_tier)

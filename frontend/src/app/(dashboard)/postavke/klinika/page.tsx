@@ -53,6 +53,15 @@ const clinicSchema = z.object({
 
 type ClinicFormData = z.infer<typeof clinicSchema>
 
+function formatTrialRemaining(days: number): string {
+  if (days >= 1) {
+    const d = Math.floor(days)
+    return `${d} ${d === 1 ? "dan" : "dana"}`
+  }
+  const hours = Math.ceil(days * 24)
+  return `${hours} ${hours === 1 ? "sat" : hours < 5 ? "sata" : "sati"}`
+}
+
 export default function KlinikaSettingsPage() {
   const { data: clinic, isLoading } = useClinicSettings()
   const updateClinic = useUpdateClinicSettings()
@@ -130,7 +139,9 @@ export default function KlinikaSettingsPage() {
                   render={({ field }) => (
                     <Select value={field.value ?? "ordinacija"} onValueChange={field.onChange}>
                       <SelectTrigger>
-                        <SelectValue />
+                        <SelectValue>
+                          {TENANT_VRSTA_OPTIONS.find((o) => o.value === (field.value ?? "ordinacija"))?.label}
+                        </SelectValue>
                       </SelectTrigger>
                       <SelectContent>
                         {TENANT_VRSTA_OPTIONS.map((opt) => (
@@ -288,7 +299,7 @@ export default function KlinikaSettingsPage() {
                 <div>
                   <p className="text-sm text-muted-foreground">Trial ističe</p>
                   <p className={`text-lg font-semibold ${usage.trial_days_remaining <= 3 ? "text-destructive" : ""}`}>
-                    {usage.trial_days_remaining} dana
+                    {formatTrialRemaining(usage.trial_days_remaining)}
                   </p>
                 </div>
               )}
@@ -325,7 +336,7 @@ export default function KlinikaSettingsPage() {
                 )}
 
                 <div className="flex items-center justify-between text-sm">
-                  <span className="text-muted-foreground">Aktivne sesije</span>
+                  <span className="text-muted-foreground">Aktivne sesije Vašeg tima</span>
                   <span className="font-medium">
                     {usage.sessions.current} / {usage.sessions.max}
                   </span>
