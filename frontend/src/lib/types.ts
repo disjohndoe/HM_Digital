@@ -717,3 +717,31 @@ export interface DocumentActionResponse {
   replaced_reference_id?: string;
   status?: string;
 }
+
+// ---------------------------------------------------------------------------
+// Predračun (proforma invoice)
+// ---------------------------------------------------------------------------
+export interface PredracunStavka {
+  id: string;
+  sifra: string;
+  naziv: string;
+  datum: string;
+  cijena_cents: number;
+}
+
+export interface Predracun {
+  id: string;
+  patient_id: string;
+  broj: string;
+  datum: string;
+  ukupno_cents: number;
+  napomena: string | null;
+  created_at: string;
+  stavke: PredracunStavka[];
+}
+
+export interface PredracunCreate {
+  patient_id: string;
+  performed_procedure_ids: string[];
+  napomena?: string | null;
+}

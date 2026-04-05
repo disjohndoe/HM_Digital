@@ -1,14 +1,15 @@
 "use client"
 /* eslint-disable react-hooks/incompatible-library -- react-hook-form watch() is intentionally used */
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useMemo } from "react"
 import { useForm } from "react-hook-form"
 import { z } from "zod"
 import { standardSchemaResolver } from "@hookform/resolvers/standard-schema"
 import { toast } from "sonner"
-import { PlusIcon } from "lucide-react"
+import { PlusIcon, FileTextIcon } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
+import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
@@ -42,8 +43,9 @@ import {
 } from "@/lib/hooks/use-procedures"
 import { useMedicalRecords } from "@/lib/hooks/use-medical-records"
 import { useRecordTypeMaps } from "@/lib/hooks/use-record-types"
+import { PredracunDialog } from "@/components/procedures/predracun-dialog"
 import { formatDateHR, formatCurrencyEUR } from "@/lib/utils"
-import type { PerformedProcedureCreate } from "@/lib/types"
+import type { PerformedProcedure, PerformedProcedureCreate } from "@/lib/types"
 
 const performedSchema = z.object({
   procedure_id: z.string().min(1, "Postupak je obavezan"),
@@ -61,6 +63,8 @@ interface PerformedListProps {
 
 export function PerformedList({ patientId }: PerformedListProps) {
   const [formOpen, setFormOpen] = useState(false)
+  const [predracunOpen, setPredracunOpen] = useState(false)
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
   const { data, isLoading } = usePerformedProcedures(patientId)
   const { data: proceduresData } = useProcedures(undefined, undefined, 0, 100)
   const { data: recordsData } = useMedicalRecords(patientId)
@@ -115,15 +119,50 @@ export function PerformedList({ patientId }: PerformedListProps) {
     }
   }
 
+  const items = data?.items ?? []
+
+  const selectedProcedures = useMemo(
+    () => items.filter((p) => selectedIds.has(p.id)),
+    [items, selectedIds],
+  )
+
+  const selectedTotal = selectedProcedures.reduce((sum, p) => sum + p.cijena_cents, 0)
+
   if (isLoading) {
     return <LoadingSpinner text="Učitavanje..." />
   }
 
-  const items = data?.items ?? []
+  const toggleSelect = (id: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
+  const toggleAll = () => {
+    if (selectedIds.size === items.length) {
+      setSelectedIds(new Set())
+    } else {
+      setSelectedIds(new Set(items.map((p) => p.id)))
+    }
+  }
 
   return (
     <div className="space-y-4">
-      <div className="flex justify-end">
+      <div className="flex items-center justify-between gap-2">
+        <div>
+          {selectedIds.size > 0 && (
+            <Button
+              variant="outline"
+              onClick={() => setPredracunOpen(true)}
+            >
+              <FileTextIcon className="mr-2 h-4 w-4" />
+              Predračun ({selectedIds.size} — {formatCurrencyEUR(selectedTotal / 100)})
+            </Button>
+          )}
+        </div>
         <Button onClick={() => setFormOpen(true)}>
           <PlusIcon className="mr-2 h-4 w-4" />
           Dodaj postupak
@@ -138,6 +177,12 @@ export function PerformedList({ patientId }: PerformedListProps) {
         <Table>
           <TableHeader>
             <TableRow>
+              <TableHead className="w-10">
+                <Checkbox
+                  checked={items.length > 0 && selectedIds.size === items.length}
+                  onCheckedChange={toggleAll}
+                />
+              </TableHead>
               <TableHead>Datum</TableHead>
               <TableHead>Postupak</TableHead>
               <TableHead className="hidden md:table-cell">Doktor</TableHead>
@@ -147,7 +192,13 @@ export function PerformedList({ patientId }: PerformedListProps) {
           </TableHeader>
           <TableBody>
             {items.map((p) => (
-              <TableRow key={p.id}>
+              <TableRow key={p.id} data-state={selectedIds.has(p.id) ? "selected" : undefined}>
+                <TableCell>
+                  <Checkbox
+                    checked={selectedIds.has(p.id)}
+                    onCheckedChange={() => toggleSelect(p.id)}
+                  />
+                </TableCell>
                 <TableCell>{formatDateHR(p.datum)}</TableCell>
                 <TableCell>
                   <span className="font-mono text-xs text-muted-foreground">
@@ -189,7 +240,11 @@ export function PerformedList({ patientId }: PerformedListProps) {
                 onValueChange={(v) => setValue("procedure_id", v ?? "")}
               >
                 <SelectTrigger>
-                  <SelectValue placeholder="Odaberite postupak" />
+                  <SelectValue placeholder="Odaberite postupak">
+                    {selectedProcedure
+                      ? `[${selectedProcedure.sifra}] ${selectedProcedure.naziv} — ${formatCurrencyEUR(selectedProcedure.cijena_cents / 100)}`
+                      : undefined}
+                  </SelectValue>
                 </SelectTrigger>
                 <SelectContent className="min-w-[400px]">
                   {procedures.map((p) => (
@@ -246,7 +301,16 @@ export function PerformedList({ patientId }: PerformedListProps) {
                   onValueChange={(v) => setValue("medical_record_id", v === "none" ? "" : (v ?? ""))}
                 >
                   <SelectTrigger>
-                    <SelectValue placeholder="Bez povezanog nalaza" />
+                    <SelectValue placeholder="Bez povezanog nalaza">
+                      {(() => {
+                        const rid = watch("medical_record_id")
+                        if (!rid) return undefined
+                        const r = records.find((rec) => rec.id === rid)
+                        return r
+                          ? `${formatDateHR(r.datum)} — ${tipLabelMap[r.tip] || r.tip}${r.dijagnoza_mkb ? ` (${r.dijagnoza_mkb})` : ""}`
+                          : undefined
+                      })()}
+                    </SelectValue>
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="none">Bez povezanog nalaza</SelectItem>
@@ -272,6 +336,14 @@ export function PerformedList({ patientId }: PerformedListProps) {
           </form>
         </DialogContent>
       </Dialog>
+
+      <PredracunDialog
+        open={predracunOpen}
+        onOpenChange={setPredracunOpen}
+        patientId={patientId}
+        selectedProcedures={selectedProcedures}
+        onSuccess={() => setSelectedIds(new Set())}
+      />
     </div>
   )
 }

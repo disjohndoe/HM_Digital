@@ -266,6 +266,57 @@ def _group_digits(s: str) -> str:
     return " ".join(chunks)
 
 
+def _format_eur(cents: int) -> str:
+    """Format cents as Croatian EUR string: 1.250,00 EUR."""
+    amount = cents / 100
+    # Manual Croatian formatting (dot=thousands, comma=decimal)
+    formatted = f"{amount:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+    return f"{formatted} EUR"
+
+
+def _build_tenant_header(tenant: dict, styles: dict) -> list:
+    """Build institution header flowables — shared by all PDF generators."""
+    naziv = _escape(tenant.get("naziv", ""))
+    vrsta = _VRSTA_LABELS.get(tenant.get("vrsta", ""), tenant.get("vrsta", ""))
+    adresa = _escape(tenant.get("adresa", ""))
+    grad_line = ""
+    if tenant.get("postanski_broj") or tenant.get("grad"):
+        grad_line = f"{_escape(tenant.get('postanski_broj', ''))} {_escape(tenant.get('grad', ''))}".strip()
+    telefon = _format_phone(tenant.get("telefon", ""))
+    oib = tenant.get("oib", "")
+    web = tenant.get("web", "")
+
+    details_lines = []
+    if vrsta:
+        details_lines.append(_escape(vrsta))
+    if adresa:
+        details_lines.append(adresa)
+    if grad_line:
+        details_lines.append(grad_line)
+    if telefon:
+        details_lines.append(f"Tel: {_escape(telefon)}")
+    if oib:
+        details_lines.append(f"OIB: {_escape(oib)}")
+    if web:
+        details_lines.append(_escape(web))
+
+    name_para = Paragraph(naziv, styles["inst_name_center"])
+    details_para = Paragraph("<br/>".join(details_lines), styles["inst_detail"])
+
+    header_data = [
+        [name_para],
+        [details_para],
+    ]
+    header_table = Table(header_data, colWidths=[180 * mm])
+    header_table.setStyle(TableStyle([
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("LINEBELOW", (0, -1), (-1, -1), 0.5, _COLOR_BORDER),
+        ("BOTTOMPADDING", (0, -1), (-1, -1), 3 * mm),
+        ("TOPPADDING", (0, 1), (0, 1), 2 * mm),
+    ]))
+    return [header_table]
+
+
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
@@ -331,49 +382,7 @@ class NalazPDFGenerator:
     # Zone 1: Institution header
     # ------------------------------------------------------------------
     def _zone_header(self) -> list:
-        s = self.styles
-        t = self.tenant
-
-        naziv = _escape(t.get("naziv", ""))
-        vrsta = _VRSTA_LABELS.get(t.get("vrsta", ""), t.get("vrsta", ""))
-        adresa = _escape(t.get("adresa", ""))
-        grad_line = ""
-        if t.get("postanski_broj") or t.get("grad"):
-            grad_line = f"{_escape(t.get('postanski_broj', ''))} {_escape(t.get('grad', ''))}".strip()
-        telefon = _format_phone(t.get("telefon", ""))
-        oib = t.get("oib", "")
-        web = t.get("web", "")
-
-        details_lines = []
-        if vrsta:
-            details_lines.append(_escape(vrsta))
-        if adresa:
-            details_lines.append(adresa)
-        if grad_line:
-            details_lines.append(grad_line)
-        if telefon:
-            details_lines.append(f"Tel: {_escape(telefon)}")
-        if oib:
-            details_lines.append(f"OIB: {_escape(oib)}")
-        if web:
-            details_lines.append(_escape(web))
-
-        # Name centered on top, details left-aligned below
-        name_para = Paragraph(naziv, s["inst_name_center"])
-        details_para = Paragraph("<br/>".join(details_lines), s["inst_detail"])
-
-        header_data = [
-            [name_para],
-            [details_para],
-        ]
-        header_table = Table(header_data, colWidths=[180 * mm])
-        header_table.setStyle(TableStyle([
-            ("VALIGN", (0, 0), (-1, -1), "TOP"),
-            ("LINEBELOW", (0, -1), (-1, -1), 0.5, _COLOR_BORDER),
-            ("BOTTOMPADDING", (0, -1), (-1, -1), 3 * mm),
-            ("TOPPADDING", (0, 1), (0, 1), 2 * mm),
-        ]))
-        return [header_table]
+        return _build_tenant_header(self.tenant, self.styles)
 
     # ------------------------------------------------------------------
     # Zone 2: Document type + date
@@ -584,6 +593,270 @@ class NalazPDFGenerator:
     # ------------------------------------------------------------------
     # Page number callback
     # ------------------------------------------------------------------
+    @staticmethod
+    def _draw_page_number(canvas, doc):
+        _register_fonts()
+        canvas.saveState()
+        canvas.setFont("DejaVuSans", 8)
+        canvas.setFillColor(_COLOR_MUTED)
+        page_text = f"Stranica {canvas.getPageNumber()}"
+        canvas.drawRightString(A4[0] - 15 * mm, 10 * mm, page_text)
+        canvas.restoreState()
+
+
+# ---------------------------------------------------------------------------
+# Predračun (proforma invoice) PDF generator
+# ---------------------------------------------------------------------------
+_COLOR_DISCLAIMER_BG = colors.HexColor("#FEF3C7")
+_COLOR_DISCLAIMER_BORDER = colors.HexColor("#D97706")
+_COLOR_DISCLAIMER_TEXT = colors.HexColor("#92400E")
+_COLOR_TOTAL_BG = colors.HexColor("#E5E7EB")
+
+
+class PredracunPDFGenerator:
+    """Generates an A4 predračun (proforma invoice) PDF."""
+
+    def __init__(
+        self,
+        *,
+        tenant: dict,
+        patient: dict,
+        predracun: dict,
+        stavke: list[dict],
+    ):
+        self.tenant = tenant or {}
+        self.patient = patient or {}
+        self.predracun = predracun or {}
+        self.stavke = stavke or []
+        self.styles = _build_styles()
+
+    def generate(self) -> bytes:
+        buf = BytesIO()
+        doc = SimpleDocTemplate(
+            buf,
+            pagesize=A4,
+            leftMargin=15 * mm,
+            rightMargin=15 * mm,
+            topMargin=12 * mm,
+            bottomMargin=15 * mm,
+            title="Predračun",
+            author=self.tenant.get("naziv", ""),
+        )
+        story = self._build_story()
+        doc.build(story, onFirstPage=self._draw_page_number, onLaterPages=self._draw_page_number)
+        return buf.getvalue()
+
+    def _build_story(self) -> list:
+        story: list = []
+        story.extend(_build_tenant_header(self.tenant, self.styles))
+        story.append(Spacer(1, 3 * mm))
+        story.extend(self._zone_title())
+        story.append(Spacer(1, 3 * mm))
+        story.extend(self._zone_disclaimer())
+        story.append(Spacer(1, 4 * mm))
+        story.extend(self._zone_patient())
+        story.append(Spacer(1, 4 * mm))
+        story.extend(self._zone_procedures_table())
+        story.append(Spacer(1, 2 * mm))
+        story.extend(self._zone_total())
+        footer_block = [Spacer(1, 6 * mm)] + self._zone_footer()
+        story.append(KeepTogether(footer_block))
+        return story
+
+    # ------------------------------------------------------------------
+    # Zone: Title — "PREDRAČUN" + broj + date
+    # ------------------------------------------------------------------
+    def _zone_title(self) -> list:
+        s = self.styles
+        broj = _escape(self.predracun.get("broj", ""))
+        datum = _format_date_hr(self.predracun.get("datum"))
+        return [
+            Paragraph("PREDRAČUN", s["doc_type"]),
+            Paragraph(f"Broj: {broj}", s["doc_date"]),
+            Paragraph(f"Datum: {datum}", s["doc_date"]),
+        ]
+
+    # ------------------------------------------------------------------
+    # Zone: Disclaimer — amber box
+    # ------------------------------------------------------------------
+    def _zone_disclaimer(self) -> list:
+        _register_fonts()
+        style = ParagraphStyle(
+            "disclaimer",
+            fontName="DejaVuSans-Bold",
+            fontSize=9,
+            leading=13,
+            alignment=TA_CENTER,
+            textColor=_COLOR_DISCLAIMER_TEXT,
+        )
+        para = Paragraph(
+            "Ovo nije fiskalizirani račun. "
+            "Predračun služi kao informativni dokument o cijeni usluga.",
+            style,
+        )
+        table = Table([[para]], colWidths=[180 * mm])
+        table.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, -1), _COLOR_DISCLAIMER_BG),
+            ("BOX", (0, 0), (-1, -1), 1, _COLOR_DISCLAIMER_BORDER),
+            ("TOPPADDING", (0, 0), (-1, -1), 3 * mm),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 3 * mm),
+            ("LEFTPADDING", (0, 0), (-1, -1), 4 * mm),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 4 * mm),
+        ]))
+        return [table]
+
+    # ------------------------------------------------------------------
+    # Zone: Patient data (simplified)
+    # ------------------------------------------------------------------
+    def _zone_patient(self) -> list:
+        s = self.styles
+        p = self.patient
+
+        ime_prezime = f"{_escape(p.get('ime', ''))} {_escape(p.get('prezime', ''))}".strip()
+        oib = _escape(p.get("oib", "")) or "—"
+
+        adresa_parts = []
+        if p.get("adresa"):
+            adresa_parts.append(_escape(p["adresa"]))
+        if p.get("postanski_broj") or p.get("grad"):
+            adresa_parts.append(f"{_escape(p.get('postanski_broj', ''))} {_escape(p.get('grad', ''))}".strip())
+        adresa = ", ".join(adresa_parts) or "—"
+
+        def _cell(label: str, value: str) -> list:
+            return [
+                Paragraph(label, s["patient_label"]),
+                Paragraph(value, s["patient_value"]),
+            ]
+
+        data = [
+            [_cell("Ime i prezime", ime_prezime), _cell("OIB", oib)],
+            [_cell("Adresa", adresa), []],
+        ]
+
+        table = Table(data, colWidths=[90 * mm, 90 * mm])
+        table.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, -1), _COLOR_LIGHT_BG),
+            ("BOX", (0, 0), (-1, -1), 0.5, _COLOR_BORDER),
+            ("INNERGRID", (0, 0), (-1, -1), 0.25, _COLOR_BORDER),
+            ("VALIGN", (0, 0), (-1, -1), "TOP"),
+            ("TOPPADDING", (0, 0), (-1, -1), 2 * mm),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 2 * mm),
+            ("LEFTPADDING", (0, 0), (-1, -1), 3 * mm),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 3 * mm),
+        ]))
+        return [
+            Paragraph("PODACI O PRIMATELJU", s["section_header"]),
+            table,
+        ]
+
+    # ------------------------------------------------------------------
+    # Zone: Procedures table
+    # ------------------------------------------------------------------
+    def _zone_procedures_table(self) -> list:
+        s = self.styles
+
+        _register_fonts()
+        td_right = ParagraphStyle(
+            "td_right", parent=s["td"], alignment=TA_RIGHT,
+        )
+        th_right = ParagraphStyle(
+            "th_right", parent=s["th"], alignment=TA_RIGHT,
+        )
+        td_center = ParagraphStyle(
+            "td_center", parent=s["td"], alignment=TA_CENTER,
+        )
+
+        header_row = [
+            Paragraph("R.br.", s["th"]),
+            Paragraph("Šifra", s["th"]),
+            Paragraph("Naziv postupka", s["th"]),
+            Paragraph("Datum", s["th"]),
+            Paragraph("Cijena (EUR)", th_right),
+        ]
+
+        data_rows = [header_row]
+        for i, stavka in enumerate(self.stavke, 1):
+            data_rows.append([
+                Paragraph(str(i), td_center),
+                Paragraph(_escape(stavka.get("sifra", "")), s["td"]),
+                Paragraph(_escape(stavka.get("naziv", "")), s["td"]),
+                Paragraph(_format_date_hr(stavka.get("datum")), s["td"]),
+                Paragraph(_format_eur(stavka.get("cijena_cents", 0)), td_right),
+            ])
+
+        col_widths = [12 * mm, 22 * mm, 85 * mm, 28 * mm, 33 * mm]
+        table = Table(data_rows, colWidths=col_widths, repeatRows=1)
+
+        style_commands = [
+            ("BACKGROUND", (0, 0), (-1, 0), _COLOR_LIGHT_BG),
+            ("LINEBELOW", (0, 0), (-1, 0), 0.5, _COLOR_BORDER),
+            ("VALIGN", (0, 0), (-1, -1), "TOP"),
+            ("TOPPADDING", (0, 0), (-1, -1), 1.5 * mm),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 1.5 * mm),
+            ("LEFTPADDING", (0, 0), (-1, -1), 2 * mm),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 2 * mm),
+            ("BOX", (0, 0), (-1, -1), 0.5, _COLOR_BORDER),
+            ("LINEBELOW", (0, 0), (-1, -2), 0.25, _COLOR_BORDER),
+        ]
+        for i in range(1, len(data_rows)):
+            if i % 2 == 0:
+                style_commands.append(("BACKGROUND", (0, i), (-1, i), _COLOR_LIGHT_BG))
+
+        table.setStyle(TableStyle(style_commands))
+        return [
+            Paragraph("STAVKE", self.styles["section_header"]),
+            table,
+        ]
+
+    # ------------------------------------------------------------------
+    # Zone: Total
+    # ------------------------------------------------------------------
+    def _zone_total(self) -> list:
+        _register_fonts()
+        total_style = ParagraphStyle(
+            "total",
+            fontName="DejaVuSans-Bold",
+            fontSize=12,
+            leading=15,
+            alignment=TA_RIGHT,
+            textColor=_COLOR_PRIMARY,
+        )
+        ukupno = self.predracun.get("ukupno_cents", 0)
+        total_text = f"UKUPNO: {_format_eur(ukupno)}"
+
+        total_data = [[Paragraph(total_text, total_style)]]
+        table = Table(total_data, colWidths=[180 * mm])
+        table.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, -1), _COLOR_TOTAL_BG),
+            ("BOX", (0, 0), (-1, -1), 0.5, _COLOR_BORDER),
+            ("TOPPADDING", (0, 0), (-1, -1), 3 * mm),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 3 * mm),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 4 * mm),
+        ]))
+        return [table]
+
+    # ------------------------------------------------------------------
+    # Zone: Footer
+    # ------------------------------------------------------------------
+    def _zone_footer(self) -> list:
+        s = self.styles
+        t = self.tenant
+
+        grad = _escape(t.get("grad", ""))
+        datum = _format_date_hr(self.predracun.get("datum"))
+        location_line = f"{grad}, {datum}" if grad else datum
+
+        elements = [
+            Paragraph(location_line, s["footer_location"]),
+        ]
+
+        napomena = self.predracun.get("napomena")
+        if napomena:
+            elements.append(Spacer(1, 2 * mm))
+            elements.append(Paragraph(f"Napomena: {_nl2br(napomena)}", s["body_small"]))
+
+        return elements
+
     @staticmethod
     def _draw_page_number(canvas, doc):
         _register_fonts()
