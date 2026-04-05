@@ -26,8 +26,6 @@ from app.services.cezih.models import (
     FHIRPatient,
     FHIRReference,
 )
-from app.config import settings
-
 logger = logging.getLogger(__name__)
 
 # CEZIH identifier systems
@@ -564,6 +562,7 @@ async def create_case(
     onset_date: str,
     verification_status: str = "unconfirmed",
     note_text: str | None = None,
+    source_oid: str | None = None,
 ) -> dict:
     """Create a case via FHIR messaging (TC16, code 2.1)."""
     fhir_client = CezihFhirClient(client)
@@ -576,6 +575,7 @@ async def create_case(
     bundle = await build_message_bundle(
         "2.1", condition,
         sender_org_code=org_code, author_practitioner_id=practitioner_id,
+        source_oid=source_oid,
     )
     bundle = await add_signature(bundle, practitioner_id, http_client=client)
     response = await fhir_client.process_message("health-issue-services/api/v1", bundle)
@@ -596,6 +596,7 @@ async def update_case(
     practitioner_id: str,
     org_code: str,
     action: str,
+    source_oid: str | None = None,
 ) -> dict:
     """Update a case via FHIR messaging (TC17, codes 2.2-2.8)."""
     from app.services.cezih.message_builder import CASE_ACTION_MAP
@@ -619,6 +620,7 @@ async def update_case(
     bundle = await build_message_bundle(
         event_code, condition,
         sender_org_code=org_code, author_practitioner_id=practitioner_id,
+        source_oid=source_oid,
     )
     bundle = await add_signature(bundle, practitioner_id, http_client=client)
     response = await fhir_client.process_message("health-issue-services/api/v1", bundle)
@@ -642,6 +644,7 @@ async def update_case_data(
     onset_date: str | None = None,
     abatement_date: str | None = None,
     note_text: str | None = None,
+    source_oid: str | None = None,
 ) -> dict:
     """Update case metadata via FHIR messaging (code 2.6).
 
@@ -660,6 +663,7 @@ async def update_case_data(
     bundle = await build_message_bundle(
         "2.6", condition,
         sender_org_code=org_code, author_practitioner_id=practitioner_id,
+        source_oid=source_oid,
     )
     bundle = await add_signature(bundle, practitioner_id, http_client=client)
     response = await fhir_client.process_message("health-issue-services/api/v1", bundle)

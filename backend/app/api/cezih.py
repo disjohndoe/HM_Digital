@@ -494,13 +494,17 @@ async def create_case(
     db: AsyncSession = Depends(get_db),
 ):
     await check_cezih_access(db, current_user.tenant_id)
+    tenant = await db.get(Tenant, current_user.tenant_id)
+    org_code = (tenant.sifra_ustanove if tenant else None) or settings.CEZIH_ORG_CODE
+    source_oid = (tenant.oid if tenant else None) or settings.CEZIH_OID
     return await cezih.dispatch_create_case(
         data.patient_mbo, current_user.practitioner_id or "",
-        settings.CEZIH_ORG_CODE,
+        org_code,
         data.icd_code, data.icd_display, data.onset_date,
         data.verification_status, data.note,
         db=db, user_id=current_user.id, tenant_id=current_user.tenant_id,
         http_client=_http_client(request),
+        source_oid=source_oid,
     )
 
 
@@ -514,12 +518,16 @@ async def update_case_status(
     db: AsyncSession = Depends(get_db),
 ):
     await check_cezih_access(db, current_user.tenant_id)
+    tenant = await db.get(Tenant, current_user.tenant_id)
+    org_code = (tenant.sifra_ustanove if tenant else None) or settings.CEZIH_ORG_CODE
+    source_oid = (tenant.oid if tenant else None) or settings.CEZIH_OID
     return await cezih.dispatch_update_case(
         case_id, mbo, current_user.practitioner_id or "",
-        settings.CEZIH_ORG_CODE,
+        org_code,
         data.action,
         db=db, user_id=current_user.id, tenant_id=current_user.tenant_id,
         http_client=_http_client(request),
+        source_oid=source_oid,
     )
 
 
@@ -533,9 +541,12 @@ async def update_case_data(
     db: AsyncSession = Depends(get_db),
 ):
     await check_cezih_access(db, current_user.tenant_id)
+    tenant = await db.get(Tenant, current_user.tenant_id)
+    org_code = (tenant.sifra_ustanove if tenant else None) or settings.CEZIH_ORG_CODE
+    source_oid = (tenant.oid if tenant else None) or settings.CEZIH_OID
     return await cezih.dispatch_update_case_data(
         case_id, mbo, current_user.practitioner_id or "",
-        settings.CEZIH_ORG_CODE,
+        org_code,
         current_clinical_status=data.current_clinical_status,
         verification_status=data.verification_status,
         icd_code=data.icd_code, icd_display=data.icd_display,
@@ -543,6 +554,7 @@ async def update_case_data(
         note_text=data.note,
         db=db, user_id=current_user.id, tenant_id=current_user.tenant_id,
         http_client=_http_client(request),
+        source_oid=source_oid,
     )
 
 

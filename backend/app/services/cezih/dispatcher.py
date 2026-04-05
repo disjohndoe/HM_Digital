@@ -559,6 +559,7 @@ async def dispatch_create_case(
     user_id: UUID | None = None,
     tenant_id: UUID | None = None,
     http_client=None,
+    source_oid: str | None = None,
 ) -> dict:
     if _is_mock():
         return await cezih_mock_service.mock_create_case(
@@ -569,6 +570,7 @@ async def dispatch_create_case(
         result = await real_service.create_case(
             http_client, patient_mbo, practitioner_id, org_code,
             icd_code, icd_display, onset_date, verification_status, note_text,
+            source_oid=source_oid,
         )
     except CezihError as e:
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=e.message) from e
@@ -592,11 +594,15 @@ async def dispatch_update_case(
     user_id: UUID | None = None,
     tenant_id: UUID | None = None,
     http_client=None,
+    source_oid: str | None = None,
 ) -> dict:
     if _is_mock():
         return await cezih_mock_service.mock_update_case(case_id, action, db=db, user_id=user_id, tenant_id=tenant_id)
     try:
-        result = await real_service.update_case(http_client, case_id, patient_mbo, practitioner_id, org_code, action)
+        result = await real_service.update_case(
+            http_client, case_id, patient_mbo, practitioner_id, org_code, action,
+            source_oid=source_oid,
+        )
     except CezihError as e:
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=e.message) from e
     result["mock"] = False
@@ -625,6 +631,7 @@ async def dispatch_update_case_data(
     user_id: UUID | None = None,
     tenant_id: UUID | None = None,
     http_client=None,
+    source_oid: str | None = None,
 ) -> dict:
     if _is_mock():
         updates = {k: v for k, v in {
@@ -642,6 +649,7 @@ async def dispatch_update_case_data(
             icd_code=icd_code, icd_display=icd_display,
             onset_date=onset_date, abatement_date=abatement_date,
             note_text=note_text,
+            source_oid=source_oid,
         )
     except CezihError as e:
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=e.message) from e
