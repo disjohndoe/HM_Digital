@@ -1,8 +1,8 @@
 "use client"
 
-import { useState } from "react"
 import {
   AlertTriangle,
+  CheckCircle2,
   Download,
   FileText,
   Loader2,
@@ -265,6 +265,11 @@ export function EkartonView({ patientId, patientMbo, alergije, fetchTime }: Ekar
                     <span className="text-xs text-muted-foreground">
                       {formatDateTimeHR(n.datum)}
                     </span>
+                    {n.cezih_signed && (
+                      <div className="flex items-center gap-1" title={`Potpisano: ${formatDateTimeHR(n.cezih_signed_at || "")}`}>
+                        <CheckCircle2 className="h-3 w-3 text-green-600" />
+                      </div>
+                    )}
                   </div>
                   {n.reference_id && !n.cezih_storno && (
                     <Button

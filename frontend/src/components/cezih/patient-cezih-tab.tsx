@@ -1,7 +1,7 @@
 "use client"
 
 import { useState } from "react"
-import { Loader2, Shield, FileText, Trash2, RefreshCw } from "lucide-react"
+import { Loader2, Shield, FileText, Trash2, RefreshCw, CheckCircle2, XCircle } from "lucide-react"
 import { toast } from "sonner"
 
 import { Button } from "@/components/ui/button"
@@ -164,6 +164,7 @@ export function PatientCezihTab({ patientId, patientMbo }: PatientCezihTabProps)
                   <TableHead>Datum</TableHead>
                   <TableHead>Tip</TableHead>
                   <TableHead className="hidden sm:table-cell">Referenca</TableHead>
+                  <TableHead className="hidden md:table-cell">Potpis</TableHead>
                   <TableHead>Status</TableHead>
                   <TableHead className="text-right">Akcije</TableHead>
                 </TableRow>
@@ -179,6 +180,19 @@ export function PatientCezihTab({ patientId, patientMbo }: PatientCezihTabProps)
                     </TableCell>
                     <TableCell className="hidden sm:table-cell font-mono text-xs">
                       {item.reference_id || "—"}
+                    </TableCell>
+                    <TableCell className="hidden md:table-cell">
+                      {item.cezih_signed ? (
+                        <div className="flex items-center gap-1" title={`Potpisano: ${formatDateTimeHR(item.cezih_signed_at || "")}`}>
+                          <CheckCircle2 className="h-3.5 w-3.5 text-green-600" />
+                          <span className="text-xs text-green-700">Da</span>
+                        </div>
+                      ) : (
+                        <div className="flex items-center gap-1" title="Nema digitalnog potpisa">
+                          <XCircle className="h-3.5 w-3.5 text-muted-foreground" />
+                          <span className="text-xs text-muted-foreground">Ne</span>
+                        </div>
+                      )}
                     </TableCell>
                     <TableCell>
                       <Badge

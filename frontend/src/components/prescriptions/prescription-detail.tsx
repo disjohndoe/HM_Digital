@@ -79,7 +79,6 @@ export function PrescriptionDetail({ open, onOpenChange, prescription }: Prescri
 
   const isDraft = !prescription.cezih_sent
   const isSent = prescription.cezih_sent && !prescription.cezih_storno
-  const isStorniran = prescription.cezih_storno
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>

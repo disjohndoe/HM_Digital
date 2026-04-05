@@ -1,7 +1,7 @@
 "use client"
 
 import { useState } from "react"
-import { Send, Loader2, PencilIcon, Pill, XCircle, RefreshCw } from "lucide-react"
+import { Send, Loader2, PencilIcon, Pill, XCircle, RefreshCw, Download } from "lucide-react"
 import { toast } from "sonner"
 
 import { Button } from "@/components/ui/button"
@@ -15,6 +15,7 @@ import {
   SheetDescription,
 } from "@/components/ui/sheet"
 import { formatDateHR, formatDateTimeHR, formatCurrencyEUR } from "@/lib/utils"
+import { api } from "@/lib/api-client"
 import { useSendENalaz, useCancelDocument, useReplaceDocument } from "@/lib/hooks/use-cezih"
 import { useRecordTypeMaps } from "@/lib/hooks/use-record-types"
 import { usePermissions } from "@/lib/hooks/use-permissions"
@@ -40,6 +41,7 @@ export function RecordDetail({ open, onOpenChange, record, patientId, onEdit }: 
   const [eReceptOpen, setEReceptOpen] = useState(false)
   const [confirmCancel, setConfirmCancel] = useState(false)
   const [confirmReplace, setConfirmReplace] = useState(false)
+  const [pdfLoading, setPdfLoading] = useState(false)
 
   const { tipLabelMap, tipColorMap, isCezihMandatory, isCezihEligible } = useRecordTypeMaps()
 
@@ -79,6 +81,28 @@ export function RecordDetail({ open, onOpenChange, record, patientId, onEdit }: 
       onError: (err) => toast.error(err.message),
     })
   }
+
+  const handleDownloadPdf = async () => {
+    setPdfLoading(true)
+    try {
+      const res = await api.fetchRaw(`/medical-records/${record.id}/pdf`)
+      const blob = await res.blob()
+      const disposition = res.headers.get("content-disposition") || ""
+      const match = disposition.match(/filename="?([^"]+)"?/)
+      const filename = match ? match[1] : `nalaz_${record.datum}_${record.id.slice(0, 4)}.pdf`
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement("a")
+      a.href = url
+      a.download = filename
+      a.click()
+      URL.revokeObjectURL(url)
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Greška pri preuzimanju PDF-a")
+    } finally {
+      setPdfLoading(false)
+    }
+  }
+
 
   const { data: linkedProcedures } = usePerformedProcedures(
     undefined, undefined, undefined, undefined, record.id,
@@ -308,14 +332,27 @@ export function RecordDetail({ open, onOpenChange, record, patientId, onEdit }: 
             </div>
           )}
 
-          {canEditMedicalRecord && (
-          <div className="pt-4">
-            <Button variant="outline" className="w-full" onClick={onEdit}>
-              <PencilIcon className="mr-2 h-4 w-4" />
-              Uredi zapis
+          <div className="flex gap-2 pt-4">
+            <Button
+              variant="outline"
+              className="flex-1"
+              onClick={handleDownloadPdf}
+              disabled={pdfLoading}
+            >
+              {pdfLoading ? (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              ) : (
+                <Download className="mr-2 h-4 w-4" />
+              )}
+              Preuzmi PDF
             </Button>
+            {canEditMedicalRecord && (
+              <Button variant="outline" className="flex-1" onClick={onEdit}>
+                <PencilIcon className="mr-2 h-4 w-4" />
+                Uredi zapis
+              </Button>
+            )}
           </div>
-          )}
         </div>
       </SheetContent>
 

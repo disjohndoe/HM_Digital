@@ -404,6 +404,7 @@ export interface AgentSecretResponse {
 
 export interface CardStatusResponse {
   agent_connected: boolean;
+  agents_count: number;
   card_inserted: boolean;
   card_holder: string | null;
   vpn_connected: boolean;
@@ -540,6 +541,8 @@ export interface PatientCezihENalaz {
   reference_id: string | null;
   cezih_sent_at: string | null;
   cezih_storno: boolean;
+  cezih_signed: boolean;
+  cezih_signed_at: string | null;
 }
 
 export interface PatientCezihERecept {

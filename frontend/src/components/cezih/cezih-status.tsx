@@ -43,7 +43,11 @@ export function CezihStatusCard() {
             <div className="flex items-center gap-2">
               <span className="text-sm text-muted-foreground">Agent:</span>
               <span className="text-sm">
-                {cezih.raw.agent_connected ? "Povezan" : "Nije povezan"}
+                {cezih.raw.agent_connected
+                  ? cardStatus?.agents_count && cardStatus.agents_count > 1
+                    ? `Povezano (${cardStatus.agents_count} agenta)`
+                    : "Povezan"
+                  : "Nije povezan"}
               </span>
             </div>
 
