@@ -1,0 +1,70 @@
+# Dependencies — huge, no useful signal
+node_modules/
+.venv/
+venv/
+__pycache__/
+*.pyc
+
+# Build outputs — derived, not source
+.next/
+dist/
+build/
+*.egg-info/
+
+# Caches — stale by definition
+.ruff_cache/
+.mypy_cache/
+.pytest_cache/
+*.tsbuildinfo
+
+# Environment & secrets — NEVER read
+.env
+.env.local
+.env.production
+*.pem
+*.key
+*.crt
+*.p12
+*.pfx
+
+# IDE / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Git internals
+.git/
+
+# Binary/generated files
+*.pdf
+*.png
+*.jpg
+*.jpeg
+*.db
+*.sqlite3
+
+# Data directories (not source code)
+backups/
+test_podaci/
+uploads/
+
+# Scraping/utility scripts (one-time, not project code)
+scrape_contacts.py
+
+# Snapshots
+snapshot*.txt
+testni_pacijent.txt
+
+# Local tooling batch files
+*.bat
+
+# Caddy volumes
+caddy_data/
+caddy_config/
+
+# Lock files (huge, auto-generated)
+pnpm-lock.yaml
