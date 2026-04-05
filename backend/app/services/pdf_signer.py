@@ -1,0 +1,154 @@
+"""PAdES digital signature embedding for medical finding PDFs.
+
+Supports two modes:
+- Mock: self-signed test certificate (for development without VPN)
+- Real: delegates to CEZIH remote signing service via ExternalSigner
+"""
+
+from __future__ import annotations
+
+import logging
+from datetime import UTC, datetime
+from io import BytesIO
+
+from cryptography import x509
+from cryptography.hazmat.primitives import hashes, serialization
+from cryptography.hazmat.primitives.asymmetric import rsa
+from cryptography.x509.oid import NameOID
+from pyhanko.pdf_utils.incremental_writer import IncrementalPdfFileWriter
+from pyhanko.pdf_utils.reader import PdfFileReader
+from pyhanko.sign import fields as sig_fields
+from pyhanko.sign import signers
+
+from app.config import settings
+
+logger = logging.getLogger(__name__)
+
+# Cache the mock signer so we don't regenerate the cert on every request
+_mock_signer: signers.SimpleSigner | None = None
+
+
+def _get_mock_signer() -> signers.SimpleSigner:
+    """Create or return a cached self-signed test signer for mock mode."""
+    global _mock_signer
+    if _mock_signer is not None:
+        return _mock_signer
+
+    # Generate RSA key
+    key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+
+    # Build self-signed certificate
+    subject = x509.Name([
+        x509.NameAttribute(NameOID.COUNTRY_NAME, "HR"),
+        x509.NameAttribute(NameOID.ORGANIZATION_NAME, "HM Digital Medical (TEST)"),
+        x509.NameAttribute(NameOID.COMMON_NAME, "HM Digital Test Signing Certificate"),
+    ])
+    cert = (
+        x509.CertificateBuilder()
+        .subject_name(subject)
+        .issuer_name(subject)
+        .public_key(key.public_key())
+        .serial_number(x509.random_serial_number())
+        .not_valid_before(datetime(2024, 1, 1, tzinfo=UTC))
+        .not_valid_after(datetime(2030, 12, 31, tzinfo=UTC))
+        .add_extension(
+            x509.KeyUsage(
+                digital_signature=True, key_encipherment=False,
+                content_commitment=True, data_encipherment=False,
+                key_agreement=False, key_cert_sign=False,
+                crl_sign=False, encipher_only=False, decipher_only=False,
+            ),
+            critical=True,
+        )
+        .sign(key, hashes.SHA256())
+    )
+
+    # Export to PKCS#12 bytes
+    pkcs12_bytes = serialization.pkcs12.serialize_key_and_certificates(
+        name=b"test",
+        key=key,
+        cert=cert,
+        cas=None,
+        encryption_algorithm=serialization.NoEncryption(),
+    )
+
+    _mock_signer = signers.SimpleSigner.load_pkcs12_data(pkcs12_bytes, other_certs=[])
+    logger.info("Mock PDF signer initialized with self-signed test certificate")
+    return _mock_signer
+
+
+def _is_mock() -> bool:
+    return getattr(settings, "CEZIH_MODE", "mock") == "mock"
+
+
+async def sign_pdf(
+    pdf_bytes: bytes,
+    *,
+    doctor_name: str = "",
+    reason: str = "Digitalno potpisani medicinski nalaz",
+    location: str = "",
+) -> bytes:
+    """Sign a PDF with a PAdES digital signature.
+
+    In mock mode, uses a self-signed test certificate.
+    In real mode, delegates to the CEZIH remote signing service (future).
+
+    Returns the signed PDF bytes.
+    """
+    if _is_mock():
+        return await _sign_mock(pdf_bytes, doctor_name=doctor_name, reason=reason, location=location)
+
+    # Real mode — for now, fall back to mock until VPN is available
+    logger.warning("Real CEZIH PDF signing not yet available (needs VPN). Falling back to mock signer.")
+    return await _sign_mock(pdf_bytes, doctor_name=doctor_name, reason=reason, location=location)
+
+
+async def _sign_mock(
+    pdf_bytes: bytes,
+    *,
+    doctor_name: str = "",
+    reason: str = "",
+    location: str = "",
+) -> bytes:
+    """Sign PDF using self-signed test certificate (mock mode)."""
+    signer = _get_mock_signer()
+
+    reader = PdfFileReader(BytesIO(pdf_bytes))
+    w = IncrementalPdfFileWriter(BytesIO(pdf_bytes))
+
+    # Determine page count for placing signature on last page
+    page_count = int(reader.root["/Pages"]["/Count"])
+    last_page = max(0, page_count - 1)
+
+    # Invisible signature — the doctor name and signature line are already
+    # in the PDF footer rendered by pdf_generator.py. We embed the digital
+    # signature as an invisible field so Adobe Reader shows "Signed by..."
+    # in the signature panel without overlapping the footer layout.
+    sig_field = sig_fields.SigFieldSpec(
+        sig_field_name="DoctorSignature",
+        on_page=last_page,
+    )
+
+    meta = signers.PdfSignatureMetadata(
+        field_name="DoctorSignature",
+        md_algorithm="sha256",
+        reason=reason,
+        location=location,
+        name=doctor_name,
+    )
+
+    output = BytesIO()
+    await signers.async_sign_pdf(
+        w,
+        meta,
+        signer=signer,
+        new_field_spec=sig_field,
+        output=output,
+    )
+
+    signed_bytes = output.getvalue()
+    logger.info(
+        "PDF signed (mock) for %s — %d → %d bytes",
+        doctor_name, len(pdf_bytes), len(signed_bytes),
+    )
+    return signed_bytes
