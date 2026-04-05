@@ -15,6 +15,7 @@ from typing import Any
 import httpx
 
 from app.config import settings
+from app.services.cezih.exceptions import CezihError
 
 logger = logging.getLogger(__name__)
 
@@ -72,8 +73,16 @@ async def build_message_bundle(
 
     Does NOT add signature — call add_signature() separately for real mode.
     """
-    sender_org_code = sender_org_code or settings.CEZIH_ORG_CODE
-    source_oid = source_oid or settings.CEZIH_OID
+    if not sender_org_code:
+        raise CezihError(
+            "Šifra zdravstvene ustanove (org_code) nije konfigurirana za ovog zakupca. "
+            "Postavite je u Postavke > Organizacija."
+        )
+    if not source_oid:
+        raise CezihError(
+            "OID informacijskog sustava nije konfiguriran za ovog zakupca. "
+            "Postavite ga u Postavke > Organizacija."
+        )
 
     resource_uuid = str(uuid.uuid4())
     header_uuid = str(uuid.uuid4())
@@ -133,9 +142,11 @@ async def add_signature(
     elif http_client:
         result = await sign_document(http_client, bundle_bytes)
     else:
-        # Mock fallback — base64 placeholder
-        import base64
-        result = {"signature": base64.b64encode(b"mock-signature-for-testing").decode()}
+        from app.services.cezih.exceptions import CezihSigningError
+        raise CezihSigningError(
+            "Potpisivanje nije moguće: signing servis nije dostupan. "
+            "Provjerite VPN povezanost i konfiguraciju potpisnog servisa."
+        )
 
     signature_data = result.get("signature", "")
 

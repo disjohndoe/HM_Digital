@@ -6,7 +6,6 @@ from fastapi import APIRouter, Depends, Query, Request
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.config import settings
 from app.constants import CEZIH_MANDATORY_TYPES
 from app.core.plan_enforcement import check_cezih_access, check_hzzo_access
 from app.database import get_db
@@ -58,6 +57,27 @@ router = APIRouter(prefix="/cezih", tags=["cezih"])
 
 def _http_client(request: Request):
     return request.app.state.http_client
+
+
+async def _get_tenant_cezih_config(
+    db: AsyncSession, tenant_id,
+) -> tuple[str, str]:
+    """Get validated org_code and OID for a tenant. Raises HTTPException if missing."""
+    from fastapi import HTTPException
+    tenant = await db.get(Tenant, tenant_id)
+    if not tenant:
+        raise HTTPException(status_code=404, detail="Zakupac nije pronađen.")
+    if not tenant.sifra_ustanove:
+        raise HTTPException(
+            status_code=422,
+            detail="Šifra zdravstvene ustanove nije konfigurirana. Postavite je u Postavke > Organizacija.",
+        )
+    if not tenant.oid:
+        raise HTTPException(
+            status_code=422,
+            detail="OID informacijskog sustava nije konfiguriran. Postavite ga u Postavke > Organizacija.",
+        )
+    return tenant.sifra_ustanove, tenant.oid
 
 
 @router.get("/status", response_model=CezihStatusResponse)
@@ -316,7 +336,7 @@ async def search_drugs(
     q: str = Query("", min_length=0),
     current_user: User = Depends(get_current_user),
 ):
-    return cezih.drug_search(q)
+    return await cezih.drug_search(q)
 
 
 @router.post("/lijekovi/sync")
@@ -494,9 +514,7 @@ async def create_case(
     db: AsyncSession = Depends(get_db),
 ):
     await check_cezih_access(db, current_user.tenant_id)
-    tenant = await db.get(Tenant, current_user.tenant_id)
-    org_code = (tenant.sifra_ustanove if tenant else None) or settings.CEZIH_ORG_CODE
-    source_oid = (tenant.oid if tenant else None) or settings.CEZIH_OID
+    org_code, source_oid = await _get_tenant_cezih_config(db, current_user.tenant_id)
     return await cezih.dispatch_create_case(
         data.patient_mbo, current_user.practitioner_id or "",
         org_code,
@@ -518,9 +536,7 @@ async def update_case_status(
     db: AsyncSession = Depends(get_db),
 ):
     await check_cezih_access(db, current_user.tenant_id)
-    tenant = await db.get(Tenant, current_user.tenant_id)
-    org_code = (tenant.sifra_ustanove if tenant else None) or settings.CEZIH_ORG_CODE
-    source_oid = (tenant.oid if tenant else None) or settings.CEZIH_OID
+    org_code, source_oid = await _get_tenant_cezih_config(db, current_user.tenant_id)
     return await cezih.dispatch_update_case(
         case_id, mbo, current_user.practitioner_id or "",
         org_code,
@@ -541,9 +557,7 @@ async def update_case_data(
     db: AsyncSession = Depends(get_db),
 ):
     await check_cezih_access(db, current_user.tenant_id)
-    tenant = await db.get(Tenant, current_user.tenant_id)
-    org_code = (tenant.sifra_ustanove if tenant else None) or settings.CEZIH_ORG_CODE
-    source_oid = (tenant.oid if tenant else None) or settings.CEZIH_OID
+    org_code, source_oid = await _get_tenant_cezih_config(db, current_user.tenant_id)
     return await cezih.dispatch_update_case_data(
         case_id, mbo, current_user.practitioner_id or "",
         org_code,

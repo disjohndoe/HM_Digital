@@ -63,6 +63,7 @@ class Settings(BaseSettings):
     CEZIH_SIGNING_OAUTH2_URL: str = ""  # Public Keycloak for signing (certpubsso.cezih.hr)
     CEZIH_TIMEOUT: int = 30
     CEZIH_RETRY_ATTEMPTS: int = 3
+    RATE_LIMIT_ENABLED: bool = True
     CEZIH_ORG_CODE: str = ""  # HZZO sifra zdravstvene organizacije
     CEZIH_OID: str = ""  # OID informacijskog sustava (urn:oid:...)
 
@@ -105,11 +106,38 @@ def _validate_jwt_secret(secret: str) -> None:
         sys.exit(1)
 
 
+def _validate_cezih_config(s: Settings) -> None:
+    """Block mock mode in production and validate required CEZIH settings."""
+    if s.CEZIH_MODE == "mock":
+        print(
+            "FATAL: CEZIH_MODE=mock is not allowed in production. "
+            "Set CEZIH_MODE=real and configure all CEZIH credentials.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    required = {
+        "CEZIH_OAUTH2_URL": s.CEZIH_OAUTH2_URL,
+        "CEZIH_CLIENT_ID": s.CEZIH_CLIENT_ID,
+        "CEZIH_CLIENT_SECRET": s.CEZIH_CLIENT_SECRET,
+        "CEZIH_FHIR_BASE_URL": s.CEZIH_FHIR_BASE_URL,
+    }
+    missing = [k for k, v in required.items() if not v]
+    if missing:
+        print(
+            f"FATAL: CEZIH_MODE=real but missing required config: {', '.join(missing)}. "
+            "All CEZIH credentials must be set in production.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+
 @lru_cache
 def get_settings() -> Settings:
     s = Settings()
     if s.is_production:
         _validate_jwt_secret(s.JWT_SECRET_KEY)
+        _validate_cezih_config(s)
     return s
 
 

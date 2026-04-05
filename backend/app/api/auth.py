@@ -14,7 +14,7 @@ from app.schemas.user import UserRead, UserReadWithTenant
 from app.services import auth_service
 from app.utils.security import hash_password, hash_refresh_token, verify_password
 
-limiter = Limiter(key_func=get_remote_address)
+limiter = Limiter(key_func=get_remote_address, enabled=settings.RATE_LIMIT_ENABLED)
 router = APIRouter(prefix="/auth", tags=["auth"])
 
 

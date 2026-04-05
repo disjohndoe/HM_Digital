@@ -43,7 +43,16 @@ class CezihFhirClient:
     def __init__(self, http_client: httpx.AsyncClient) -> None:
         self._client = http_client
         self._base_url = settings.CEZIH_FHIR_BASE_URL.rstrip("/")
-        self._aux_url = (settings.CEZIH_FHIR_AUX_URL or settings.CEZIH_FHIR_BASE_URL).rstrip("/")
+        if settings.CEZIH_FHIR_AUX_URL:
+            self._aux_url = settings.CEZIH_FHIR_AUX_URL.rstrip("/")
+        elif settings.CEZIH_FHIR_BASE_URL:
+            logger.warning(
+                "CEZIH_FHIR_AUX_URL not set, auxiliary services will use CEZIH_FHIR_BASE_URL (%s)",
+                settings.CEZIH_FHIR_BASE_URL,
+            )
+            self._aux_url = settings.CEZIH_FHIR_BASE_URL.rstrip("/")
+        else:
+            raise CezihError("Ni CEZIH_FHIR_AUX_URL ni CEZIH_FHIR_BASE_URL nisu konfigurirani.")
 
     def _full_url(self, path: str) -> str:
         if not path.startswith("/"):

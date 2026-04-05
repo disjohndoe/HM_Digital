@@ -66,7 +66,14 @@ async def _get_signing_token(client: httpx.AsyncClient) -> str:
                 assert _signing_token_cache is not None
                 return _signing_token_cache
 
-        oauth_url = settings.CEZIH_SIGNING_OAUTH2_URL or settings.CEZIH_OAUTH2_URL
+        oauth_url = settings.CEZIH_SIGNING_OAUTH2_URL
+        if not oauth_url:
+            oauth_url = settings.CEZIH_OAUTH2_URL
+            if oauth_url:
+                logger.warning(
+                    "CEZIH_SIGNING_OAUTH2_URL not set, falling back to CEZIH_OAUTH2_URL (%s)",
+                    oauth_url,
+                )
         if not oauth_url or not settings.CEZIH_CLIENT_ID:
             raise CezihSigningError(
                 "Signing OAuth2 URL and Client ID must be configured. "
@@ -102,7 +109,6 @@ async def _get_signing_token(client: httpx.AsyncClient) -> str:
             ) from e
 
         body = response.json()
-        global _signing_token_cache, _signing_token_expires_in, _signing_token_acquired_at
         _signing_token_cache = body["access_token"]
         _signing_token_expires_in = body.get("expires_in", 300)
         _signing_token_acquired_at = _time.monotonic()
