@@ -32,8 +32,12 @@ jobs:
             exit 1
           fi
 
-          # Check if version changed from previous commit
-          git diff HEAD~1 HEAD -- local-agent/src-tauri/tauri.conf.json | grep -q '"version"' && CHANGED="true" || CHANGED="false"
+          # Check if version changed from previous commit (skip check on workflow_dispatch)
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            CHANGED="true"
+          else
+            git diff HEAD~1 HEAD -- local-agent/src-tauri/tauri.conf.json | grep -q '"version"' && CHANGED="true" || CHANGED="false"
+          fi
 
           echo "changed=$CHANGED" >> "$GITHUB_OUTPUT"
           echo "version=$CONFIG_VERSION" >> "$GITHUB_OUTPUT"
