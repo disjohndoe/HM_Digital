@@ -56,9 +56,12 @@ function extractErrorMessage(detail: unknown): string {
 
 function handleAuthFailure(): never {
   document.cookie = "has_session=; path=/; SameSite=Lax; max-age=0";
-  localStorage.setItem("auth_redirect_reason", "session_expired");
-  localStorage.setItem("auth_redirect_reason_ts", Date.now().toString());
-  window.location.href = "/prijava";
+  // Prevent redirect loop — only redirect if not already on login page
+  if (!window.location.pathname.startsWith("/prijava")) {
+    localStorage.setItem("auth_redirect_reason", "session_expired");
+    localStorage.setItem("auth_redirect_reason_ts", Date.now().toString());
+    window.location.href = "/prijava";
+  }
   throw new Error("Sesija je istekla");
 }
 
@@ -80,7 +83,10 @@ async function apiClient<T>(endpoint: string, options: RequestOptions = {}): Pro
     throw new Error("Greška u komunikaciji s poslužiteljem. Provjerite mrežnu vezu i pokušajte ponovo.");
   }
 
-  if (res.status === 401 && !endpoint.startsWith("/auth/")) {
+  // Only skip refresh for login/register (no session to refresh).
+  // /auth/me and other auth endpoints SHOULD trigger refresh when token expired.
+  const isAuthFlowEndpoint = endpoint === "/auth/login" || endpoint === "/auth/register";
+  if (res.status === 401 && !isAuthFlowEndpoint) {
     try {
       await refreshTokens();
 
@@ -121,9 +127,20 @@ async function apiClient<T>(endpoint: string, options: RequestOptions = {}): Pro
   return res.json();
 }
 
-async function apiClientRaw(endpoint: string): Promise<Response> {
+async function apiClientRaw(
+  endpoint: string,
+  options?: { method?: string; body?: unknown },
+): Promise<Response> {
+  const method = options?.method || "GET";
+  const headers: Record<string, string> = {};
+  const fetchBody = options?.body ? JSON.stringify(options.body) : undefined;
+  if (fetchBody) headers["Content-Type"] = "application/json";
+
   let res = await fetch(`${API_BASE}${endpoint}`, {
+    method,
     credentials: "include",
+    headers,
+    body: fetchBody,
   });
 
   if (res.status === 401) {
@@ -131,7 +148,10 @@ async function apiClientRaw(endpoint: string): Promise<Response> {
       await refreshTokens();
 
       res = await fetch(`${API_BASE}${endpoint}`, {
+        method,
         credentials: "include",
+        headers,
+        body: fetchBody,
       });
 
       if (!res.ok) {
@@ -168,4 +188,6 @@ export const api = {
   delete: <T>(endpoint: string) =>
     apiClient<T>(endpoint, { method: "DELETE" }),
   fetchRaw: (endpoint: string) => apiClientRaw(endpoint),
+  postRaw: (endpoint: string, body: unknown) =>
+    apiClientRaw(endpoint, { method: "POST", body }),
 };
