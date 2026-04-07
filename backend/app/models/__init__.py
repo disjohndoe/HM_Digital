@@ -1,6 +1,7 @@
 from app.models.appointment import Appointment
 from app.models.audit_log import AuditLog
 from app.models.base import Base, BaseTenantModel, TenantMixin, TimestampMixin
+from app.models.biljeska import Biljeska
 from app.models.document import Document
 from app.models.drug_list import DrugListItem
 from app.models.medical_record import MedicalRecord
@@ -16,6 +17,7 @@ __all__ = [
     "AuditLog",
     "Base",
     "BaseTenantModel",
+    "Biljeska",
     "Document",
     "DrugListItem",
     "MedicalRecord",
