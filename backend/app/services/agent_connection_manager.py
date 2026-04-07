@@ -164,13 +164,20 @@ class AgentConnectionManager:
         headers: dict[str, str],
         body: str | None = None,
         timeout: float = 30.0,
+        card_holder_name: str | None = None,
     ) -> dict:
         """Send an HTTP request through a connected agent and wait for the response.
 
         The agent makes the actual HTTP call with native TLS (smart card mTLS).
+        If card_holder_name is specified, prefers the agent whose inserted card
+        matches that holder (for multi-doctor tenants with separate machines).
         Returns the parsed response dict or raises an exception.
         """
-        conn = self.get_any_connected(tenant_id)
+        conn = None
+        if card_holder_name:
+            conn = self.find_by_card_holder(tenant_id, card_holder_name)
+        if not conn:
+            conn = self.get_any_connected(tenant_id)
         if not conn:
             raise RuntimeError("No agent connected for this tenant")
 

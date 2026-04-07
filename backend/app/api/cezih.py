@@ -508,7 +508,8 @@ async def list_cases(
         db=db, user_id=current_user.id, tenant_id=current_user.tenant_id,
         http_client=_http_client(request),
     )
-    return CasesListResponse(cases=[CaseItem.model_validate(c) for c in cases])
+    from app.config import settings
+    return CasesListResponse(mock=settings.CEZIH_MODE == "mock", cases=[CaseItem.model_validate(c) for c in cases])
 
 
 @router.post("/cases", response_model=CaseResponse)
@@ -673,7 +674,8 @@ async def list_visits(
         mbo, db=db, user_id=current_user.id, tenant_id=current_user.tenant_id,
         http_client=_http_client(request),
     )
-    return VisitsListResponse(visits=visits)  # type: ignore[arg-type]
+    from app.config import settings
+    return VisitsListResponse(mock=settings.CEZIH_MODE == "mock", visits=visits)  # type: ignore[arg-type]
 
 
 @router.post("/visits", response_model=VisitResponse)

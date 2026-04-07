@@ -19,11 +19,19 @@ pub fn check_vpn_status() -> VpnStatus {
         };
     }
 
-    // Check for VPN-like network adapters (OpenVPN TAP, WireGuard, etc.)
+    // Check for VPN-like network adapters (OpenVPN TAP, WireGuard, Cisco AnyConnect, etc.)
     if let Some(name) = check_vpn_adapters() {
         return VpnStatus {
             connected: true,
             connection_name: Some(name),
+        };
+    }
+
+    // Fallback: check if CEZIH VPN subnet (172.30.0.0/23) is routable
+    if check_cezih_route() {
+        return VpnStatus {
+            connected: true,
+            connection_name: Some("CEZIH VPN (route detected)".to_string()),
         };
     }
 
@@ -63,7 +71,7 @@ fn check_vpn_adapters() -> Option<String> {
         .ok()?;
     let stdout = String::from_utf8_lossy(&output.stdout);
 
-    let vpn_keywords = ["TAP-Windows", "OpenVPN", "WireGuard", "CEZIH", "VPN", "Fortinet", "FortiClient"];
+    let vpn_keywords = ["TAP-Windows", "OpenVPN", "WireGuard", "CEZIH", "VPN", "Fortinet", "FortiClient", "Cisco AnyConnect", "AnyConnect"];
     let mut current_adapter: Option<String> = None;
     let mut has_ip = false;
 
@@ -98,4 +106,15 @@ fn check_vpn_adapters() -> Option<String> {
     }
 
     None
+}
+
+/// Check if CEZIH VPN subnet is routable via Windows routing table.
+fn check_cezih_route() -> bool {
+    let output = match Command::new("route").args(["print", "172.30.*"]).output() {
+        Ok(o) => o,
+        Err(_) => return false,
+    };
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    // If 172.30.0.0 appears in the routing table, the VPN tunnel is up
+    stdout.contains("172.30.0")
 }

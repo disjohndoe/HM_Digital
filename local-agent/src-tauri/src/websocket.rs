@@ -54,20 +54,23 @@ fn build_status_message() -> serde_json::Value {
     })
 }
 
-/// Cookie file path for persistent sessions across CEZIH calls.
-const COOKIE_FILE: &str = "cezih_session_cookies.txt";
+/// Cookie file name prefix for persistent sessions across CEZIH calls.
+/// Each agent instance gets its own cookie jar keyed by agent_id.
+const COOKIE_FILE_PREFIX: &str = "cezih_session_";
 
 /// Handle an HTTP proxy request via curl.exe subprocess.
 /// Uses --ssl-auto-client-cert for SChannel smart card mTLS.
 /// Cookie jar persists the Keycloak session across requests.
-async fn handle_http_proxy(msg: serde_json::Value) -> String {
+async fn handle_http_proxy(msg: serde_json::Value, agent_id: &str) -> String {
     let request_id = msg.get("request_id").and_then(|v| v.as_str()).unwrap_or("");
     let method = msg.get("method").and_then(|v| v.as_str()).unwrap_or("GET");
     let url = msg.get("url").and_then(|v| v.as_str()).unwrap_or("");
     let headers = msg.get("headers").and_then(|v| v.as_object());
     let body = msg.get("body");
 
-    let cookie_path = std::env::temp_dir().join(COOKIE_FILE);
+    // Each agent gets its own cookie jar to prevent session conflicts in multi-agent setups
+    let cookie_file = format!("{}{}.txt", COOKIE_FILE_PREFIX, &agent_id[..agent_id.len().min(8)]);
+    let cookie_path = std::env::temp_dir().join(cookie_file);
     let cookie_str = cookie_path.to_string_lossy().to_string();
 
     let mut cmd = tokio::process::Command::new("curl.exe");
@@ -253,8 +256,9 @@ pub fn spawn_connection_task(
                                                         parsed.get("url").and_then(|v| v.as_str()).unwrap_or("?"));
                                                     let tx = outbound_tx.clone();
                                                     let p = parsed.clone();
+                                                    let aid = agent_id.clone().unwrap_or_default();
                                                     tokio::spawn(async move {
-                                                        let resp = handle_http_proxy(p).await;
+                                                        let resp = handle_http_proxy(p, &aid).await;
                                                         let _ = tx.send(resp).await;
                                                     });
                                                 }

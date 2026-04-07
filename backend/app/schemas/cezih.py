@@ -263,7 +263,7 @@ class VisitResponse(BaseModel):
 
 
 class VisitItem(BaseModel):
-    mock: bool = True
+    mock: bool = False
     visit_id: str
     patient_mbo: str
     status: str
@@ -274,7 +274,7 @@ class VisitItem(BaseModel):
 
 
 class VisitsListResponse(BaseModel):
-    mock: bool = True
+    mock: bool = False
     visits: list[VisitItem]
 
 
@@ -284,7 +284,7 @@ class VisitsListResponse(BaseModel):
 
 
 class CaseItem(BaseModel):
-    mock: bool = True
+    mock: bool = False
     case_id: str
     icd_code: str
     icd_display: str
@@ -293,7 +293,7 @@ class CaseItem(BaseModel):
 
 
 class CasesListResponse(BaseModel):
-    mock: bool = True
+    mock: bool = False
     cases: list[CaseItem]
 
 
