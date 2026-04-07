@@ -851,10 +851,12 @@ async def dispatch_create_visit(
         )
     _require_audit_params(db, user_id, tenant_id)
     try:
+        from app.services.cezih.client import CezihFhirClient
         from app.services.cezih.message_builder import (
             build_encounter_create, build_message_bundle, ENCOUNTER_EVENT_PROFILE_MAP,
             PROFILE_ENCOUNTER, PROFILE_ENCOUNTER_MSG_HEADER,
         )
+        fhir_client = CezihFhirClient(http_client)
         encounter = build_encounter_create(
             patient_mbo=patient_mbo, nacin_prijema=nacin_prijema,
             vrsta_posjete=vrsta_posjete, tip_posjete=tip_posjete,
@@ -870,7 +872,7 @@ async def dispatch_create_visit(
             "1.1", encounter, sender_org_code=org_code, author_practitioner_id=practitioner_id,
             source_oid=source_oid, profile_urls=profile_urls,
         )
-        result = await http_client.process_message("encounter-services/api/v1", bundle)
+        result = await fhir_client.process_message("encounter-services/api/v1", bundle)
     except CezihError as e:
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=e.message) from e
     result["mock"] = False
@@ -883,44 +885,130 @@ async def dispatch_create_visit(
 
 async def dispatch_update_visit(
     visit_id: str,
+    patient_mbo: str,
     reason: str | None = None,
     *,
     db: AsyncSession | None = None,
     user_id: UUID | None = None,
     tenant_id: UUID | None = None,
     http_client=None,
+    practitioner_id: str | None = None,
+    org_code: str | None = None,
+    source_oid: str | None = None,
 ) -> dict:
     if _is_mock():
         return await cezih_mock_service.mock_update_visit(
-            visit_id, reason, db=db, user_id=user_id, tenant_id=tenant_id,
+            visit_id, reason, patient_mbo=patient_mbo,
+            db=db, user_id=user_id, tenant_id=tenant_id,
         )
     _require_audit_params(db, user_id, tenant_id)
-    # TODO: Implement real visit update via encounter-services/api/v1/$process-message with code 1.2
-    raise HTTPException(
-        status_code=status.HTTP_501_NOT_IMPLEMENTED,
-        detail="Real mode visit update not yet implemented",
+    try:
+        from app.services.cezih.client import CezihFhirClient
+        from app.services.cezih.message_builder import (
+            build_encounter_update, build_message_bundle, ENCOUNTER_EVENT_PROFILE_MAP,
+            PROFILE_ENCOUNTER, PROFILE_ENCOUNTER_MSG_HEADER,
+        )
+        fhir_client = CezihFhirClient(http_client)
+        encounter = build_encounter_update(
+            encounter_id=visit_id,
+            patient_mbo=patient_mbo,
+            reason=reason,
+            practitioner_id=practitioner_id or "",
+            org_code=org_code or "",
+        )
+        bundle_profile = ENCOUNTER_EVENT_PROFILE_MAP.get("1.2")
+        profile_urls = {
+            "bundle": bundle_profile,
+            "header": PROFILE_ENCOUNTER_MSG_HEADER,
+            "resource": PROFILE_ENCOUNTER,
+        } if bundle_profile else None
+        bundle = await build_message_bundle(
+            "1.2", encounter,
+            sender_org_code=org_code, author_practitioner_id=practitioner_id,
+            source_oid=source_oid, profile_urls=profile_urls,
+        )
+        result = await fhir_client.process_message("encounter-services/api/v1", bundle)
+    except CezihError as e:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=e.message) from e
+    result["mock"] = False
+    await _write_audit(
+        db, tenant_id, user_id, action="visit_update",
+        details={"visit_id": visit_id, "mode": "real"},
     )
+    return result
 
 
 async def dispatch_visit_action(
     visit_id: str,
     action: str,
+    patient_mbo: str,
     *,
     db: AsyncSession | None = None,
     user_id: UUID | None = None,
     tenant_id: UUID | None = None,
     http_client=None,
+    practitioner_id: str | None = None,
+    org_code: str | None = None,
+    source_oid: str | None = None,
 ) -> dict:
     if _is_mock():
         return await cezih_mock_service.mock_visit_action(
-            visit_id, action, db=db, user_id=user_id, tenant_id=tenant_id,
+            visit_id, action, patient_mbo=patient_mbo,
+            db=db, user_id=user_id, tenant_id=tenant_id,
         )
     _require_audit_params(db, user_id, tenant_id)
-    # TODO: Implement real visit close/reopen/storno via encounter-services/api/v1/$process-message
-    raise HTTPException(
-        status_code=status.HTTP_501_NOT_IMPLEMENTED,
-        detail="Real mode visit action not yet implemented",
+    try:
+        from app.services.cezih.client import CezihFhirClient
+        from app.services.cezih.message_builder import (
+            build_encounter_close, build_encounter_cancel, build_encounter_reopen,
+            build_message_bundle, ENCOUNTER_EVENT_PROFILE_MAP, VISIT_ACTION_MAP,
+            PROFILE_ENCOUNTER, PROFILE_ENCOUNTER_MSG_HEADER,
+        )
+        fhir_client = CezihFhirClient(http_client)
+        action_info = VISIT_ACTION_MAP.get(action)
+        if action_info is None:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=f"Nepoznata akcija posjete: {action}. Dozvoljene: close, storno, reopen.",
+            )
+        event_code = action_info["code"]
+        builder_map = {
+            "1.3": build_encounter_close,
+            "1.4": build_encounter_cancel,
+            "1.5": build_encounter_reopen,
+        }
+        builder_fn = builder_map.get(event_code)
+        if not builder_fn:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Nema builder funkcije za event code {event_code}",
+            )
+        encounter = builder_fn(
+            encounter_id=visit_id,
+            patient_mbo=patient_mbo,
+            practitioner_id=practitioner_id or "",
+            org_code=org_code or "",
+        )
+        bundle_profile = ENCOUNTER_EVENT_PROFILE_MAP.get(event_code)
+        profile_urls = {
+            "bundle": bundle_profile,
+            "header": PROFILE_ENCOUNTER_MSG_HEADER,
+            "resource": PROFILE_ENCOUNTER,
+        } if bundle_profile else None
+        bundle = await build_message_bundle(
+            event_code, encounter,
+            sender_org_code=org_code, author_practitioner_id=practitioner_id,
+            source_oid=source_oid, profile_urls=profile_urls,
+        )
+        result = await fhir_client.process_message("encounter-services/api/v1", bundle)
+    except CezihError as e:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=e.message) from e
+    result["mock"] = False
+    await _write_audit(
+        db, tenant_id, user_id, action=f"visit_{action}",
+        details={"visit_id": visit_id, "action": action, "mode": "real"},
     )
+    return result
 
 
 async def dispatch_list_visits(

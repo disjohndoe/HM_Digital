@@ -491,6 +491,8 @@ async def mock_create_visit(
 async def mock_update_visit(
     visit_id: str,
     reason: str | None = None,
+    *,
+    patient_mbo: str = "",
     db: AsyncSession | None = None,
     user_id: UUID | None = None,
     tenant_id: UUID | None = None,
@@ -500,7 +502,7 @@ async def mock_update_visit(
         await _write_audit(
             db, tenant_id, user_id,
             action="visit_update",
-            details={"visit_id": visit_id},
+            details={"visit_id": visit_id, "mbo": patient_mbo},
         )
     return result
 
@@ -508,6 +510,8 @@ async def mock_update_visit(
 async def mock_visit_action(
     visit_id: str,
     action: str,
+    *,
+    patient_mbo: str = "",
     db: AsyncSession | None = None,
     user_id: UUID | None = None,
     tenant_id: UUID | None = None,
@@ -519,7 +523,7 @@ async def mock_visit_action(
         await _write_audit(
             db, tenant_id, user_id,
             action=f"visit_{action}",
-            details={"visit_id": visit_id, "action": action},
+            details={"visit_id": visit_id, "action": action, "mbo": patient_mbo},
         )
     return result
 

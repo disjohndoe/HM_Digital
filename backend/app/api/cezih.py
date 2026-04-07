@@ -699,14 +699,18 @@ async def update_visit(
     request: Request,
     visit_id: str,
     data: UpdateVisitRequest,
+    mbo: str = Query(..., min_length=1, description="Patient MBO"),
     current_user: User = Depends(require_roles("admin", "doctor")),
     db: AsyncSession = Depends(get_db),
 ):
     await check_cezih_access(db, current_user.tenant_id)
+    org_code, source_oid = await _get_tenant_cezih_config(db, current_user.tenant_id)
     return await cezih.dispatch_update_visit(
-        visit_id, data.reason,
+        visit_id, mbo, data.reason,
         db=db, user_id=current_user.id, tenant_id=current_user.tenant_id,
         http_client=_http_client(request),
+        practitioner_id=str(current_user.id),
+        org_code=org_code, source_oid=source_oid,
     )
 
 
@@ -715,12 +719,16 @@ async def visit_action(
     request: Request,
     visit_id: str,
     data: VisitActionRequest,
+    mbo: str = Query(..., min_length=1, description="Patient MBO"),
     current_user: User = Depends(require_roles("admin", "doctor")),
     db: AsyncSession = Depends(get_db),
 ):
     await check_cezih_access(db, current_user.tenant_id)
+    org_code, source_oid = await _get_tenant_cezih_config(db, current_user.tenant_id)
     return await cezih.dispatch_visit_action(
-        visit_id, data.action,
+        visit_id, data.action, mbo,
         db=db, user_id=current_user.id, tenant_id=current_user.tenant_id,
         http_client=_http_client(request),
+        practitioner_id=str(current_user.id),
+        org_code=org_code, source_oid=source_oid,
     )

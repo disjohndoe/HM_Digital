@@ -29,6 +29,7 @@ ID_ORG = "http://fhir.cezih.hr/specifikacije/identifikatori/HZZO-sifra-zdravstve
 ID_PRACTITIONER = "http://fhir.cezih.hr/specifikacije/identifikatori/HZJZ-broj-zdravstvenog-djelatnika"
 ID_CASE_GLOBAL = "http://fhir.cezih.hr/specifikacije/identifikatori/identifikator-slucaja"
 ID_CASE_LOCAL = "http://fhir.cezih.hr/specifikacije/identifikatori/lokalni-identifikator-slucaja"
+ID_ENCOUNTER = "http://fhir.cezih.hr/specifikacije/identifikatori/identifikator-posjete"
 
 CS_ICD10_HR = "http://fhir.cezih.hr/specifikacije/CodeSystem/icd10-hr"
 CS_ANNOTATION_TYPE = "http://fhir.cezih.hr/specifikacije/CodeSystem/annotation-type"
@@ -221,6 +222,12 @@ ENCOUNTER_EVENT_PROFILE_MAP = {
     "1.5": f"{_PROFILE_BASE}/hr-reopen-encounter-message",
 }
 
+VISIT_ACTION_MAP: dict[str, dict[str, str]] = {
+    "close": {"code": "1.3", "status": "finished"},
+    "storno": {"code": "1.4", "status": "entered-in-error"},
+    "reopen": {"code": "1.5", "status": "in-progress"},
+}
+
 
 def build_encounter_create(
     *,
@@ -274,6 +281,109 @@ def build_encounter_create(
         }]
     if reason:
         encounter["reasonCode"] = [{"text": reason}]
+    return encounter
+
+
+def build_encounter_update(
+    *,
+    encounter_id: str,
+    patient_mbo: str,
+    reason: str | None = None,
+    practitioner_id: str = "",
+    org_code: str = "",
+) -> dict[str, Any]:
+    """Build FHIR Encounter resource for visit update (event code 1.2)."""
+    encounter: dict[str, Any] = {
+        "resourceType": "Encounter",
+        "id": encounter_id,
+        "identifier": [{"system": ID_ENCOUNTER, "value": encounter_id}],
+        "status": "in-progress",
+        "subject": patient_ref(patient_mbo),
+    }
+    if org_code:
+        encounter["serviceProvider"] = org_ref(org_code)
+    if practitioner_id:
+        encounter["participant"] = [{
+            "individual": practitioner_ref(practitioner_id),
+        }]
+    if reason:
+        encounter["reasonCode"] = [{"text": reason}]
+    return encounter
+
+
+def build_encounter_close(
+    *,
+    encounter_id: str,
+    patient_mbo: str,
+    practitioner_id: str = "",
+    org_code: str = "",
+) -> dict[str, Any]:
+    """Build FHIR Encounter resource for visit close (event code 1.3)."""
+    encounter: dict[str, Any] = {
+        "resourceType": "Encounter",
+        "id": encounter_id,
+        "identifier": [{"system": ID_ENCOUNTER, "value": encounter_id}],
+        "status": "finished",
+        "period": {"end": _now_iso()},
+        "subject": patient_ref(patient_mbo),
+    }
+    if org_code:
+        encounter["serviceProvider"] = org_ref(org_code)
+    if practitioner_id:
+        encounter["participant"] = [{
+            "individual": practitioner_ref(practitioner_id),
+        }]
+    return encounter
+
+
+def build_encounter_cancel(
+    *,
+    encounter_id: str,
+    patient_mbo: str,
+    reason: str | None = None,
+    practitioner_id: str = "",
+    org_code: str = "",
+) -> dict[str, Any]:
+    """Build FHIR Encounter resource for visit cancellation/storno (event code 1.4)."""
+    encounter: dict[str, Any] = {
+        "resourceType": "Encounter",
+        "id": encounter_id,
+        "identifier": [{"system": ID_ENCOUNTER, "value": encounter_id}],
+        "status": "entered-in-error",
+        "subject": patient_ref(patient_mbo),
+    }
+    if org_code:
+        encounter["serviceProvider"] = org_ref(org_code)
+    if practitioner_id:
+        encounter["participant"] = [{
+            "individual": practitioner_ref(practitioner_id),
+        }]
+    if reason:
+        encounter["reasonCode"] = [{"text": reason}]
+    return encounter
+
+
+def build_encounter_reopen(
+    *,
+    encounter_id: str,
+    patient_mbo: str,
+    practitioner_id: str = "",
+    org_code: str = "",
+) -> dict[str, Any]:
+    """Build FHIR Encounter resource for visit reopen (event code 1.5)."""
+    encounter: dict[str, Any] = {
+        "resourceType": "Encounter",
+        "id": encounter_id,
+        "identifier": [{"system": ID_ENCOUNTER, "value": encounter_id}],
+        "status": "in-progress",
+        "subject": patient_ref(patient_mbo),
+    }
+    if org_code:
+        encounter["serviceProvider"] = org_ref(org_code)
+    if practitioner_id:
+        encounter["participant"] = [{
+            "individual": practitioner_ref(practitioner_id),
+        }]
     return encounter
 
 

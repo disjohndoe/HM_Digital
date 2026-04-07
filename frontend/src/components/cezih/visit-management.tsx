@@ -92,7 +92,7 @@ export function VisitManagement({ patientId, patientMbo }: VisitManagementProps)
 
   const handleAction = (visitId: string, action: string) => {
     visitAction.mutate(
-      { visitId, action },
+      { visitId, action, patientMbo },
       {
         onSuccess: () => {
           const label = VISIT_ACTIONS.find((a) => a.value === action)?.label || action
