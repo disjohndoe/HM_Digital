@@ -26,6 +26,7 @@ from app.services.cezih.models import (
     FHIRPatient,
     FHIRReference,
 )
+
 logger = logging.getLogger(__name__)
 
 # CEZIH identifier systems

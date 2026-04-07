@@ -29,6 +29,7 @@ import {
   useRetrieveCases,
   useCreateCase,
   useUpdateCaseStatus,
+  useUpdateCaseData,
   useCodeSystemQuery,
 } from "@/lib/hooks/use-cezih"
 import { MockBadge } from "./mock-badge"
@@ -67,9 +68,13 @@ export function CaseManagement({ patientId, patientMbo }: CaseManagementProps) {
   const [onsetDate, setOnsetDate] = useState(new Date().toISOString().split("T")[0])
   const [note, setNote] = useState("")
 
+  const [editCaseId, setEditCaseId] = useState<string | null>(null)
+  const [editNote, setEditNote] = useState("")
+
   const casesQuery = useRetrieveCases(patientMbo)
   const createCase = useCreateCase()
   const updateStatus = useUpdateCaseStatus()
+  const updateData = useUpdateCaseData()
   const icdSearch = useCodeSystemQuery("icd10-hr", icdQuery)
 
   const handleCreate = () => {
@@ -219,8 +224,8 @@ export function CaseManagement({ patientId, patientMbo }: CaseManagementProps) {
         ) : (
           <div className="space-y-3">
             {cases.map((c) => (
+              <div key={c.case_id} className="space-y-2">
               <div
-                key={c.case_id}
                 className="flex items-center justify-between p-3 rounded-lg border"
               >
                 <div className="space-y-1">
@@ -235,31 +240,78 @@ export function CaseManagement({ patientId, patientMbo }: CaseManagementProps) {
                     Od: {formatDateHR(c.onset_date)} | ID: {c.case_id}
                   </div>
                 </div>
-                <Select
-                  value={pendingAction[c.case_id] || null}
-                  onValueChange={(action) => {
-                    if (action) {
-                      setPendingAction((prev) => ({ ...prev, [c.case_id]: action as string }))
-                      handleAction(c.case_id, action as string)
-                    }
-                  }}
-                  disabled={updateStatus.isPending}
-                >
-                  <SelectTrigger className="w-[140px] h-8 text-xs">
-                    <SelectValue placeholder="Akcija..." />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {CASE_ACTIONS.filter((a) => {
-                      if (c.clinical_status === "resolved") return ["reopen", "delete"].includes(a.value)
-                      if (c.clinical_status === "remission") return ["relapse", "resolve", "delete"].includes(a.value)
-                      return ["remission", "relapse", "resolve", "delete"].includes(a.value)
-                    }).map((a) => (
-                      <SelectItem key={a.value} value={a.value}>
-                        {a.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <div className="flex items-center gap-2">
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="h-8 text-xs"
+                    onClick={() => {
+                      setEditCaseId(editCaseId === c.case_id ? null : c.case_id)
+                      setEditNote("")
+                    }}
+                  >
+                    Uredi
+                  </Button>
+                  <Select
+                    value={pendingAction[c.case_id] || null}
+                    onValueChange={(action) => {
+                      if (action) {
+                        setPendingAction((prev) => ({ ...prev, [c.case_id]: action as string }))
+                        handleAction(c.case_id, action as string)
+                      }
+                    }}
+                    disabled={updateStatus.isPending}
+                  >
+                    <SelectTrigger className="w-[140px] h-8 text-xs">
+                      <SelectValue placeholder="Akcija..." />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {CASE_ACTIONS.filter((a) => {
+                        if (c.clinical_status === "resolved") return ["reopen", "delete"].includes(a.value)
+                        if (c.clinical_status === "remission") return ["relapse", "resolve", "delete"].includes(a.value)
+                        return ["remission", "relapse", "resolve", "delete"].includes(a.value)
+                      }).map((a) => (
+                        <SelectItem key={a.value} value={a.value}>
+                          {a.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+              {editCaseId === c.case_id && (
+                <div className="rounded-lg border p-3 space-y-2">
+                  <Label className="text-xs">Bilješka / napomena</Label>
+                  <Textarea
+                    value={editNote}
+                    onChange={(e) => setEditNote(e.target.value)}
+                    placeholder="Ažurirajte bilješku slučaja..."
+                    className="min-h-[60px] text-sm"
+                  />
+                  <div className="flex justify-end gap-2">
+                    <Button size="sm" variant="outline" onClick={() => setEditCaseId(null)}>Odustani</Button>
+                    <Button
+                      size="sm"
+                      disabled={updateData.isPending}
+                      onClick={() => {
+                        updateData.mutate(
+                          { caseId: c.case_id, mbo: patientMbo, note: editNote || undefined },
+                          {
+                            onSuccess: () => {
+                              toast.success("Podaci slučaja ažurirani")
+                              setEditCaseId(null)
+                            },
+                            onError: (err) => toast.error(err.message),
+                          },
+                        )
+                      }}
+                    >
+                      {updateData.isPending && <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />}
+                      Spremi
+                    </Button>
+                  </div>
+                </div>
+              )}
               </div>
             ))}
           </div>

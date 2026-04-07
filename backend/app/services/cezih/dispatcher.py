@@ -22,13 +22,15 @@ def _is_mock() -> bool:
 
 
 async def _write_audit(
-    db: AsyncSession,
-    tenant_id: UUID,
-    user_id: UUID,
+    db: AsyncSession | None,
+    tenant_id: UUID | None,
+    user_id: UUID | None,
     action: str,
     resource_id: UUID | None = None,
     details: dict | None = None,
 ) -> None:
+    if not db or not tenant_id or not user_id:
+        return
     from app.services.audit_service import write_audit
 
     await write_audit(
@@ -329,7 +331,9 @@ async def _get_medical_record(db: AsyncSession, tenant_id: UUID, patient_id: UUI
     return result.scalar_one_or_none()
 
 
-async def _get_medical_record_by_id(db: AsyncSession, tenant_id: UUID, record_id: UUID):
+async def _get_medical_record_by_id(db: AsyncSession | None, tenant_id: UUID | None, record_id: UUID | None):
+    if not db or not tenant_id or not record_id:
+        return None
     from app.models.medical_record import MedicalRecord
 
     result = await db.execute(
@@ -757,7 +761,7 @@ async def dispatch_replace_document(
     # Persist signature data if we have a record
     if record_id and result.get("signature_data"):
         record = await _get_medical_record_by_id(db, tenant_id, record_id)
-        if record:
+        if record and db:
             record.cezih_signature_data = result["signature_data"]
             if result.get("signed_at"):
                 record.cezih_signed_at = datetime.fromisoformat(result["signed_at"])
@@ -819,3 +823,103 @@ async def dispatch_retrieve_document(
         details={"reference_id": reference_id, "mode": "real"},
     )
     return result
+
+
+# ============================================================
+# TC12-14: Visit Management
+# ============================================================
+
+
+async def dispatch_create_visit(
+    patient_mbo: str,
+    visit_type: str = "AMB",
+    reason: str | None = None,
+    *,
+    db: AsyncSession | None = None,
+    user_id: UUID | None = None,
+    tenant_id: UUID | None = None,
+    http_client=None,
+    practitioner_id: str | None = None,
+    org_code: str | None = None,
+    source_oid: str | None = None,
+) -> dict:
+    if _is_mock():
+        return await cezih_mock_service.mock_create_visit(
+            patient_mbo, visit_type, reason, db=db, user_id=user_id, tenant_id=tenant_id,
+        )
+    _require_audit_params(db, user_id, tenant_id)
+    try:
+        from app.services.cezih.message_builder import build_encounter_create, build_message_bundle
+        encounter = build_encounter_create(
+            patient_mbo=patient_mbo, visit_type=visit_type, reason=reason,
+            practitioner_id=practitioner_id or "", org_code=org_code or "",
+        )
+        bundle = await build_message_bundle(
+            "1.1", encounter, sender_org_code=org_code, author_practitioner_id=practitioner_id,
+            source_oid=source_oid,
+        )
+        result = await http_client.process_message("encounter-services/api/v1", bundle)
+    except CezihError as e:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=e.message) from e
+    result["mock"] = False
+    await _write_audit(db, tenant_id, user_id, action="visit_create", details={"mbo": patient_mbo, "mode": "real"})
+    return result
+
+
+async def dispatch_update_visit(
+    visit_id: str,
+    reason: str | None = None,
+    *,
+    db: AsyncSession | None = None,
+    user_id: UUID | None = None,
+    tenant_id: UUID | None = None,
+    http_client=None,
+) -> dict:
+    if _is_mock():
+        return await cezih_mock_service.mock_update_visit(
+            visit_id, reason, db=db, user_id=user_id, tenant_id=tenant_id,
+        )
+    _require_audit_params(db, user_id, tenant_id)
+    # TODO: Implement real visit update via encounter-services/api/v1/$process-message with code 1.2
+    raise HTTPException(
+        status_code=status.HTTP_501_NOT_IMPLEMENTED,
+        detail="Real mode visit update not yet implemented",
+    )
+
+
+async def dispatch_visit_action(
+    visit_id: str,
+    action: str,
+    *,
+    db: AsyncSession | None = None,
+    user_id: UUID | None = None,
+    tenant_id: UUID | None = None,
+    http_client=None,
+) -> dict:
+    if _is_mock():
+        return await cezih_mock_service.mock_visit_action(
+            visit_id, action, db=db, user_id=user_id, tenant_id=tenant_id,
+        )
+    _require_audit_params(db, user_id, tenant_id)
+    # TODO: Implement real visit close/reopen/storno via encounter-services/api/v1/$process-message
+    raise HTTPException(
+        status_code=status.HTTP_501_NOT_IMPLEMENTED,
+        detail="Real mode visit action not yet implemented",
+    )
+
+
+async def dispatch_list_visits(
+    patient_mbo: str,
+    *,
+    db: AsyncSession | None = None,
+    user_id: UUID | None = None,
+    tenant_id: UUID | None = None,
+    http_client=None,
+) -> list[dict]:
+    if _is_mock():
+        return await cezih_mock_service.mock_list_visits(
+            patient_mbo, db=db, user_id=user_id, tenant_id=tenant_id,
+        )
+    _require_audit_params(db, user_id, tenant_id)
+    # TODO: Implement real visit list via ihe-qedm-services/api/v1/Encounter
+    raise HTTPException(status_code=status.HTTP_501_NOT_IMPLEMENTED, detail="Real mode visit list not yet implemented")

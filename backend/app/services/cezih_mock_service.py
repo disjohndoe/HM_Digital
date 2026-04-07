@@ -446,10 +446,94 @@ async def mock_register_foreigner(
     if db and user_id and tenant_id:
         await _write_audit(
             db, tenant_id, user_id,
-            action="foreigner_registration",
+            action="foreigner_register",
             details={"ime": patient_data.get("ime"), "prezime": patient_data.get("prezime"), "mbo": mock_mbo},
         )
     return result
+
+
+# ============================================================
+# TC12-14: Visit Management (Mock)
+# ============================================================
+
+_MOCK_VISITS: list[dict] = [
+    {"visit_id": "MOCK-V-001", "patient_mbo": "123456789", "status": "in-progress",
+     "visit_type": "AMB", "reason": "Kontrolni pregled", "period_start": "2026-04-07T08:00:00", "period_end": None},
+    {"visit_id": "MOCK-V-002", "patient_mbo": "234567890", "status": "finished",
+     "visit_type": "AMB", "reason": "Kardiološki pregled",
+     "period_start": "2026-04-06T09:30:00",
+     "period_end": "2026-04-06T10:15:00"},
+]
+
+
+async def mock_create_visit(
+    patient_mbo: str,
+    visit_type: str = "AMB",
+    reason: str | None = None,
+    db: AsyncSession | None = None,
+    user_id: UUID | None = None,
+    tenant_id: UUID | None = None,
+) -> dict:
+    import os
+    visit_id = f"MOCK-V-{os.urandom(4).hex()}"
+    result = {
+        "mock": True, "success": True,
+        "visit_id": visit_id, "status": "in-progress",
+    }
+    if db and user_id and tenant_id:
+        await _write_audit(
+            db, tenant_id, user_id,
+            action="visit_create",
+            details={"mbo": patient_mbo, "visit_id": visit_id, "visit_type": visit_type},
+        )
+    return result
+
+
+async def mock_update_visit(
+    visit_id: str,
+    reason: str | None = None,
+    db: AsyncSession | None = None,
+    user_id: UUID | None = None,
+    tenant_id: UUID | None = None,
+) -> dict:
+    result = {"mock": True, "success": True, "visit_id": visit_id, "status": "in-progress"}
+    if db and user_id and tenant_id:
+        await _write_audit(
+            db, tenant_id, user_id,
+            action="visit_update",
+            details={"visit_id": visit_id},
+        )
+    return result
+
+
+async def mock_visit_action(
+    visit_id: str,
+    action: str,
+    db: AsyncSession | None = None,
+    user_id: UUID | None = None,
+    tenant_id: UUID | None = None,
+) -> dict:
+    status_map = {"close": "finished", "reopen": "in-progress", "storno": "entered-in-error"}
+    new_status = status_map.get(action, "in-progress")
+    result = {"mock": True, "success": True, "visit_id": visit_id, "status": new_status}
+    if db and user_id and tenant_id:
+        await _write_audit(
+            db, tenant_id, user_id,
+            action=f"visit_{action}",
+            details={"visit_id": visit_id, "action": action},
+        )
+    return result
+
+
+async def mock_list_visits(
+    patient_mbo: str,
+    db: AsyncSession | None = None,
+    user_id: UUID | None = None,
+    tenant_id: UUID | None = None,
+) -> list[dict]:
+    if db and user_id and tenant_id:
+        await _write_audit(db, tenant_id, user_id, action="visit_list", details={"mbo": patient_mbo})
+    return [{"mock": True, **v} for v in _MOCK_VISITS]
 
 
 # ============================================================

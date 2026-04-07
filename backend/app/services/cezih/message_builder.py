@@ -14,7 +14,6 @@ from typing import Any
 
 import httpx
 
-from app.config import settings
 from app.services.cezih.exceptions import CezihError
 
 logger = logging.getLogger(__name__)
@@ -163,6 +162,49 @@ async def add_signature(
     }
 
     return bundle
+
+
+# --- Encounter Resource Builders (TC12-14) ---
+
+
+CS_VISIT_TYPE = "http://terminology.hl7.org/CodeSystem/v3-ActCode"
+
+VISIT_TYPE_MAP = {
+    "AMB": "ambulatory",
+    "EMER": "emergency",
+    "HH": "home health",
+}
+
+
+def build_encounter_create(
+    *,
+    patient_mbo: str,
+    visit_type: str = "AMB",
+    reason: str | None = None,
+    practitioner_id: str = "",
+    org_code: str = "",
+) -> dict[str, Any]:
+    """Build FHIR Encounter resource for visit creation (code 1.1)."""
+    encounter: dict[str, Any] = {
+        "resourceType": "Encounter",
+        "status": "in-progress",
+        "class": {
+            "system": CS_VISIT_TYPE,
+            "code": visit_type,
+            "display": VISIT_TYPE_MAP.get(visit_type, visit_type),
+        },
+        "subject": patient_ref(patient_mbo),
+        "period": {"start": _now_iso()},
+    }
+    if org_code:
+        encounter["serviceProvider"] = org_ref(org_code)
+    if practitioner_id:
+        encounter["participant"] = [{
+            "individual": practitioner_ref(practitioner_id),
+        }]
+    if reason:
+        encounter["reasonCode"] = [{"text": reason}]
+    return encounter
 
 
 # --- Condition Resource Builders ---
