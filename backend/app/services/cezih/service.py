@@ -523,6 +523,42 @@ def _extract_mbo_from_response(response: dict) -> str:
 # ============================================================
 
 
+async def list_visits(client: httpx.AsyncClient, patient_mbo: str) -> list[dict]:
+    """List encounters/visits for a patient (QEDm Encounter query).
+
+    GET /ihe-qedm-services/api/v1/Encounter?patient.identifier={SYS_MBO}|{mbo}
+    """
+    fhir_client = CezihFhirClient(client)
+    params = {
+        "patient.identifier": f"http://fhir.cezih.hr/specifikacije/identifikatori/MBO|{patient_mbo}",
+    }
+    response = await fhir_client.get("ihe-qedm-services/api/v1/Encounter", params=params)
+
+    visits: list[dict] = []
+    if response.get("resourceType") == "Bundle":
+        for entry in response.get("entry", []):
+            enc = entry.get("resource", {})
+            visit_id = enc.get("id", "")
+            for ident in enc.get("identifier", []):
+                if "identifikator-posjete" in (ident.get("system") or ""):
+                    visit_id = ident.get("value", visit_id)
+            enc_class = enc.get("class", {})
+            visit_type = enc_class.get("code", "") if isinstance(enc_class, dict) else ""
+            period = enc.get("period", {})
+            reason_list = enc.get("reasonCode", [])
+            reason_text = reason_list[0].get("text", "") if reason_list else ""
+            visits.append({
+                "visit_id": visit_id,
+                "patient_mbo": patient_mbo,
+                "status": enc.get("status", ""),
+                "visit_type": visit_type,
+                "reason": reason_text,
+                "period_start": period.get("start"),
+                "period_end": period.get("end"),
+            })
+    return visits
+
+
 async def retrieve_cases(client: httpx.AsyncClient, patient_mbo: str) -> list[dict]:
     """Retrieve existing cases for a patient (TC15, QEDm)."""
     fhir_client = CezihFhirClient(client)

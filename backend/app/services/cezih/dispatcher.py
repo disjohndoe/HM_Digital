@@ -1024,5 +1024,9 @@ async def dispatch_list_visits(
             patient_mbo, db=db, user_id=user_id, tenant_id=tenant_id,
         )
     _require_audit_params(db, user_id, tenant_id)
-    # TODO: Implement real visit list via ihe-qedm-services/api/v1/Encounter
-    raise HTTPException(status_code=status.HTTP_501_NOT_IMPLEMENTED, detail="Real mode visit list not yet implemented")
+    try:
+        result = await real_service.list_visits(http_client, patient_mbo)
+    except CezihError as e:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=e.message) from e
+    await _write_audit(db, tenant_id, user_id, action="visit_list", details={"mbo": patient_mbo, "mode": "real"})
+    return result
