@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import uuid as _uuid
 from dataclasses import dataclass, field
@@ -7,6 +8,9 @@ from uuid import UUID
 from fastapi import WebSocket
 
 logger = logging.getLogger(__name__)
+
+# Pending HTTP proxy requests: request_id -> asyncio.Future
+_pending_proxy: dict[str, asyncio.Future] = {}
 
 
 @dataclass
@@ -149,6 +153,58 @@ class AgentConnectionManager:
             logger.warning("Failed to send to agent %s for tenant %s", agent_id[:8], tenant_id)
             await self.disconnect(tenant_id, agent_id)
             return False
+
+
+    async def proxy_http_request(
+        self,
+        tenant_id: UUID,
+        *,
+        method: str,
+        url: str,
+        headers: dict[str, str],
+        body: str | None = None,
+        timeout: float = 30.0,
+    ) -> dict:
+        """Send an HTTP request through a connected agent and wait for the response.
+
+        The agent makes the actual HTTP call with native TLS (smart card mTLS).
+        Returns the parsed response dict or raises an exception.
+        """
+        conn = self.get_any_connected(tenant_id)
+        if not conn:
+            raise RuntimeError("No agent connected for this tenant")
+
+        request_id = str(_uuid.uuid4())
+        loop = asyncio.get_event_loop()
+        future: asyncio.Future = loop.create_future()
+        _pending_proxy[request_id] = future
+
+        message = {
+            "type": "http_proxy_request",
+            "request_id": request_id,
+            "method": method,
+            "url": url,
+            "headers": headers,
+            "body": body,
+        }
+
+        try:
+            await conn.websocket.send_json(message)
+            result = await asyncio.wait_for(future, timeout=timeout)
+            return result
+        except TimeoutError:
+            raise RuntimeError(f"Agent HTTP proxy timed out after {timeout}s")
+        finally:
+            _pending_proxy.pop(request_id, None)
+
+    @staticmethod
+    def resolve_proxy_response(request_id: str, response: dict) -> None:
+        """Called when agent sends http_proxy_response — resolves the waiting future."""
+        future = _pending_proxy.get(request_id)
+        if future and not future.done():
+            future.set_result(response)
+        else:
+            logger.warning("No pending proxy request for id %s", request_id[:8])
 
 
 agent_manager = AgentConnectionManager()

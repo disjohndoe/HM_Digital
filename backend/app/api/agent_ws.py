@@ -99,6 +99,10 @@ async def agent_websocket(websocket: WebSocket):
                 if was_inserted and not now_inserted:
                     await _handle_card_removal(tenant_id, agent_id, previous_card_holder)
 
+            elif msg_type == "http_proxy_response":
+                req_id = msg.get("request_id", "")
+                agent_manager.resolve_proxy_response(req_id, msg)
+
             elif msg_type in ("sign_response", "sign_error"):
                 # Future: forward to waiting request
                 logger.info("Received %s from agent %s for tenant %s", msg_type, agent_id[:8], tenant_id)

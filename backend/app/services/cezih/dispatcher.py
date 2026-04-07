@@ -55,6 +55,9 @@ def _require_audit_params(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Interna greška: nedostaju parametri za revizijski zapis CEZIH operacije.",
         )
+    # Set context so CezihFhirClient can route 8443 calls through the agent
+    from app.services.cezih.client import current_tenant_id
+    current_tenant_id.set(tenant_id)
 
 
 # --- Dispatch functions ---

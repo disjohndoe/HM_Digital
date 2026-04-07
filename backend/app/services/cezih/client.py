@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextvars
 import logging
 import time
 
@@ -17,6 +18,10 @@ from app.services.cezih.models import OperationOutcome
 from app.services.cezih.oauth import get_oauth_token, invalidate_token
 
 logger = logging.getLogger(__name__)
+
+# Context variable set by the dispatcher before calling service functions.
+# Allows CezihFhirClient to route 8443 calls through the agent.
+current_tenant_id: contextvars.ContextVar = contextvars.ContextVar("current_tenant_id", default=None)
 
 _FHIR_CONTENT_TYPE = "application/fhir+json"
 _GATEWAY_PREFIX = "/services-router/gateway/"
@@ -38,10 +43,15 @@ class CezihFhirClient:
 
     Handles: Bearer token injection, FHIR content types, retry with backoff,
     structured logging, and exception translation.
+
+    For port-8443 requests (clinical services requiring mTLS), routes through
+    the local agent's native TLS stack if an agent is connected. Port-9443
+    requests (reference services) go directly via httpx.
     """
 
-    def __init__(self, http_client: httpx.AsyncClient) -> None:
+    def __init__(self, http_client: httpx.AsyncClient, tenant_id=None) -> None:
         self._client = http_client
+        self._tenant_id = tenant_id or current_tenant_id.get()
         self._base_url = settings.CEZIH_FHIR_BASE_URL.rstrip("/")
         if settings.CEZIH_FHIR_AUX_URL:
             self._aux_url = settings.CEZIH_FHIR_AUX_URL.rstrip("/")
@@ -54,17 +64,88 @@ class CezihFhirClient:
         else:
             raise CezihError("Ni CEZIH_FHIR_AUX_URL ni CEZIH_FHIR_BASE_URL nisu konfigurirani.")
 
+    def _is_aux_service(self, path: str) -> bool:
+        clean = path.lstrip("/")
+        return any(clean.startswith(p) for p in _AUX_PORT_PREFIXES)
+
     def _full_url(self, path: str) -> str:
         if not path.startswith("/"):
             path = "/" + path
         clean = path.lstrip("/")
-        base = self._aux_url if any(clean.startswith(p) for p in _AUX_PORT_PREFIXES) else self._base_url
-        return f"{base}{_GATEWAY_PREFIX}{path}"
+        base = self._aux_url if self._is_aux_service(path) else self._base_url
+        return f"{base}{_GATEWAY_PREFIX}{clean}"
 
     async def _attach_auth(self, headers: dict[str, str]) -> dict[str, str]:
         token = await get_oauth_token(client=self._client)
         headers["Authorization"] = f"Bearer {token}"
         return headers
+
+    def _should_use_agent(self, path: str) -> bool:
+        """Check if this request should be routed through the agent (primary port = 8443)."""
+        if self._is_aux_service(path):
+            return False  # 9443 services work directly
+        if not self._tenant_id:
+            return False
+        from app.services.agent_connection_manager import agent_manager
+        return agent_manager.is_connected(self._tenant_id)
+
+    async def _request_via_agent(
+        self, method: str, url: str, headers: dict[str, str],
+        params: dict | None, json_body: dict | None, timeout: int,
+    ) -> dict:
+        """Route request through the agent's native TLS for mTLS client cert."""
+        import json as _json
+        from app.services.agent_connection_manager import agent_manager
+
+        # Append query params to URL
+        if params:
+            from urllib.parse import urlencode
+            url = f"{url}?{urlencode(params, doseq=True)}"
+
+        body_str = _json.dumps(json_body) if json_body else None
+
+        logger.info("CEZIH request via agent: %s %s", method, url)
+        start = time.perf_counter()
+
+        try:
+            result = await agent_manager.proxy_http_request(
+                self._tenant_id,
+                method=method, url=url, headers=headers,
+                body=body_str, timeout=float(timeout),
+            )
+        except RuntimeError as e:
+            raise CezihConnectionError(str(e)) from e
+
+        duration_ms = (time.perf_counter() - start) * 1000
+
+        if "error" in result:
+            raise CezihConnectionError(f"Agent proxy error: {result['error']}")
+
+        status_code = result.get("status_code", 0)
+        logger.info("CEZIH response via agent: %s %s -> %d (%.1fms)", method, url, status_code, duration_ms)
+        if status_code >= 400:
+            logger.warning("CEZIH agent proxy error body: %s", result.get("body", "")[:1000])
+
+        body_text = result.get("body", "")
+        try:
+            body = _json.loads(body_text) if body_text else {}
+        except Exception:
+            body = {}
+
+        if status_code >= 400:
+            if body.get("resourceType") == "OperationOutcome":
+                oo = OperationOutcome.model_validate(body)
+                raise CezihFhirError(
+                    f"FHIR error: {oo.first_error_message}",
+                    status_code=status_code,
+                    operation_outcome=body,
+                )
+            raise CezihFhirError(
+                f"CEZIH HTTP {status_code}: {body_text[:500]}",
+                status_code=status_code,
+            )
+
+        return body
 
     async def request(
         self,
@@ -85,6 +166,10 @@ class CezihFhirClient:
             "Content-Type": _FHIR_CONTENT_TYPE,
         }
         headers = await self._attach_auth(headers)
+
+        # Route 8443 calls through agent if connected (for mTLS client cert)
+        if self._should_use_agent(path):
+            return await self._request_via_agent(method, url, headers, params, json_body, timeout)
 
         start = time.perf_counter()
         logger.info("CEZIH request: %s %s (attempt %d/%d)", method, url, _attempt + 1, max_attempts)

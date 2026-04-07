@@ -5,7 +5,7 @@ use futures_util::{SinkExt, StreamExt};
 use log::{error, info, warn};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use tokio::sync::RwLock;
+use tokio::sync::{mpsc, RwLock};
 use tokio_tungstenite::tungstenite::Message;
 
 use crate::smartcard::check_card_status;
@@ -54,6 +54,92 @@ fn build_status_message() -> serde_json::Value {
     })
 }
 
+/// Handle an HTTP proxy request — make the HTTP call using native TLS (Windows cert store).
+async fn handle_http_proxy(msg: serde_json::Value) -> String {
+    let request_id = msg.get("request_id").and_then(|v| v.as_str()).unwrap_or("");
+    let method = msg.get("method").and_then(|v| v.as_str()).unwrap_or("GET");
+    let url = msg.get("url").and_then(|v| v.as_str()).unwrap_or("");
+    let headers = msg.get("headers").and_then(|v| v.as_object());
+    let body = msg.get("body");
+
+    // Build reqwest client with native TLS (uses Windows Certificate Store → smart card mTLS)
+    let client = match reqwest::Client::builder()
+        .use_native_tls()
+        .danger_accept_invalid_certs(false)
+        .timeout(Duration::from_secs(30))
+        .build()
+    {
+        Ok(c) => c,
+        Err(e) => {
+            return json!({
+                "type": "http_proxy_response",
+                "request_id": request_id,
+                "error": format!("Failed to build HTTP client: {}", e)
+            }).to_string();
+        }
+    };
+
+    let mut req = match method.to_uppercase().as_str() {
+        "GET" => client.get(url),
+        "POST" => client.post(url),
+        "PUT" => client.put(url),
+        "DELETE" => client.delete(url),
+        "PATCH" => client.patch(url),
+        _ => {
+            return json!({
+                "type": "http_proxy_response",
+                "request_id": request_id,
+                "error": format!("Unsupported method: {}", method)
+            }).to_string();
+        }
+    };
+
+    // Set headers from the request
+    if let Some(hdrs) = headers {
+        for (key, val) in hdrs {
+            if let Some(v) = val.as_str() {
+                req = req.header(key.as_str(), v);
+            }
+        }
+    }
+
+    // Set body if present
+    if let Some(b) = body {
+        if !b.is_null() {
+            req = req.body(b.to_string());
+        }
+    }
+
+    // Execute the request
+    match req.send().await {
+        Ok(resp) => {
+            let status_code = resp.status().as_u16();
+            let resp_headers: serde_json::Map<String, serde_json::Value> = resp
+                .headers()
+                .iter()
+                .map(|(k, v)| (k.to_string(), json!(v.to_str().unwrap_or(""))))
+                .collect();
+            let resp_body = resp.text().await.unwrap_or_default();
+            info!("HTTP proxy response {} — {} ({} bytes)", &request_id[..request_id.len().min(8)], status_code, resp_body.len());
+            json!({
+                "type": "http_proxy_response",
+                "request_id": request_id,
+                "status_code": status_code,
+                "headers": resp_headers,
+                "body": resp_body
+            }).to_string()
+        }
+        Err(e) => {
+            error!("HTTP proxy error for {} — {}", &request_id[..request_id.len().min(8)], e);
+            json!({
+                "type": "http_proxy_response",
+                "request_id": request_id,
+                "error": format!("{}", e)
+            }).to_string()
+        }
+    }
+}
+
 /// Spawn a WebSocket connection task that reconnects with exponential backoff.
 pub fn spawn_connection_task(
     backend_url: String,
@@ -91,6 +177,9 @@ pub fn spawn_connection_task(
                         error!("Failed to send auth message");
                         break;
                     }
+
+                    // Channel for spawned tasks to send WS messages (e.g., HTTP proxy responses)
+                    let (outbound_tx, mut outbound_rx) = mpsc::channel::<String>(32);
 
                     // Don't set ws_connected yet — wait for server "connected" confirmation
                     {
@@ -149,6 +238,19 @@ pub fn spawn_connection_task(
                                                     });
                                                     let _ = write.send(Message::Text(response.to_string().into())).await;
                                                 }
+                                                "http_proxy_request" => {
+                                                    let rid = parsed.get("request_id").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                                                    info!("HTTP proxy request {} — {} {}",
+                                                        &rid[..rid.len().min(8)],
+                                                        parsed.get("method").and_then(|v| v.as_str()).unwrap_or("?"),
+                                                        parsed.get("url").and_then(|v| v.as_str()).unwrap_or("?"));
+                                                    let tx = outbound_tx.clone();
+                                                    let p = parsed.clone();
+                                                    tokio::spawn(async move {
+                                                        let resp = handle_http_proxy(p).await;
+                                                        let _ = tx.send(resp).await;
+                                                    });
+                                                }
                                                 other => {
                                                     warn!("Unknown message type: {}", other);
                                                 }
@@ -167,6 +269,12 @@ pub fn spawn_connection_task(
                                         break;
                                     }
                                     _ => {}
+                                }
+                            }
+                            // Forward outbound messages from spawned tasks (HTTP proxy responses)
+                            Some(outbound_msg) = outbound_rx.recv() => {
+                                if write.send(Message::Text(outbound_msg.into())).await.is_err() {
+                                    break;
                                 }
                             }
                             _ = status_interval.tick() => {
