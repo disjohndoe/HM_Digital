@@ -54,7 +54,12 @@ fn build_status_message() -> serde_json::Value {
     })
 }
 
-/// Handle an HTTP proxy request — make the HTTP call using native TLS (Windows cert store).
+/// Cookie file path for persistent sessions across CEZIH calls.
+const COOKIE_FILE: &str = "cezih_session_cookies.txt";
+
+/// Handle an HTTP proxy request via curl.exe subprocess.
+/// Uses --ssl-auto-client-cert for SChannel smart card mTLS.
+/// Cookie jar persists the Keycloak session across requests.
 async fn handle_http_proxy(msg: serde_json::Value) -> String {
     let request_id = msg.get("request_id").and_then(|v| v.as_str()).unwrap_or("");
     let method = msg.get("method").and_then(|v| v.as_str()).unwrap_or("GET");
@@ -62,43 +67,27 @@ async fn handle_http_proxy(msg: serde_json::Value) -> String {
     let headers = msg.get("headers").and_then(|v| v.as_object());
     let body = msg.get("body");
 
-    // Build reqwest client with native TLS (uses Windows Certificate Store → smart card mTLS)
-    let client = match reqwest::Client::builder()
-        .use_native_tls()
-        .danger_accept_invalid_certs(false)
-        .timeout(Duration::from_secs(30))
-        .build()
-    {
-        Ok(c) => c,
-        Err(e) => {
-            return json!({
-                "type": "http_proxy_response",
-                "request_id": request_id,
-                "error": format!("Failed to build HTTP client: {}", e)
-            }).to_string();
-        }
-    };
+    let cookie_path = std::env::temp_dir().join(COOKIE_FILE);
+    let cookie_str = cookie_path.to_string_lossy().to_string();
 
-    let mut req = match method.to_uppercase().as_str() {
-        "GET" => client.get(url),
-        "POST" => client.post(url),
-        "PUT" => client.put(url),
-        "DELETE" => client.delete(url),
-        "PATCH" => client.patch(url),
-        _ => {
-            return json!({
-                "type": "http_proxy_response",
-                "request_id": request_id,
-                "error": format!("Unsupported method: {}", method)
-            }).to_string();
-        }
-    };
+    let mut cmd = tokio::process::Command::new("curl.exe");
+    cmd.arg("-s")                      // Silent
+       .arg("-L")                      // Follow redirects
+       .arg("--ssl-auto-client-cert")  // SChannel auto-select smart card cert
+       .arg("-b").arg(&cookie_str)     // Read cookies
+       .arg("-c").arg(&cookie_str)     // Write cookies
+       .arg("--max-time").arg("30")
+       .arg("-w").arg("\n%{http_code}") // Append status code
+       .arg("-X").arg(method);
 
-    // Set headers from the request
+    // Set headers — skip Authorization (let smart card cert auth handle it)
     if let Some(hdrs) = headers {
         for (key, val) in hdrs {
+            if key.eq_ignore_ascii_case("authorization") {
+                continue;
+            }
             if let Some(v) = val.as_str() {
-                req = req.header(key.as_str(), v);
+                cmd.arg("-H").arg(format!("{}: {}", key, v));
             }
         }
     }
@@ -106,35 +95,53 @@ async fn handle_http_proxy(msg: serde_json::Value) -> String {
     // Set body if present
     if let Some(b) = body {
         if !b.is_null() {
-            req = req.body(b.to_string());
+            let body_str = if b.is_string() { b.as_str().unwrap_or("").to_string() } else { b.to_string() };
+            cmd.arg("-d").arg(body_str);
         }
     }
 
-    // Execute the request
-    match req.send().await {
-        Ok(resp) => {
-            let status_code = resp.status().as_u16();
-            let resp_headers: serde_json::Map<String, serde_json::Value> = resp
-                .headers()
-                .iter()
-                .map(|(k, v)| (k.to_string(), json!(v.to_str().unwrap_or(""))))
-                .collect();
-            let resp_body = resp.text().await.unwrap_or_default();
+    cmd.arg(url);
+
+    // Execute curl
+    match cmd.output().await {
+        Ok(output) => {
+            let raw = String::from_utf8_lossy(&output.stdout).to_string();
+            let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+
+            if !output.status.success() && raw.is_empty() {
+                error!("curl failed for {} — exit={}, stderr={}", &request_id[..request_id.len().min(8)], output.status, stderr);
+                return json!({
+                    "type": "http_proxy_response",
+                    "request_id": request_id,
+                    "error": format!("curl failed: {}", stderr.trim())
+                }).to_string();
+            }
+
+            // Parse status code from last line (appended by -w)
+            let (resp_body, status_code) = match raw.rfind('\n') {
+                Some(pos) => {
+                    let code_str = raw[pos+1..].trim();
+                    let code = code_str.parse::<u16>().unwrap_or(0);
+                    (raw[..pos].to_string(), code)
+                }
+                None => (raw, 0),
+            };
+
             info!("HTTP proxy response {} — {} ({} bytes)", &request_id[..request_id.len().min(8)], status_code, resp_body.len());
             json!({
                 "type": "http_proxy_response",
                 "request_id": request_id,
                 "status_code": status_code,
-                "headers": resp_headers,
+                "headers": {},
                 "body": resp_body
             }).to_string()
         }
         Err(e) => {
-            error!("HTTP proxy error for {} — {}", &request_id[..request_id.len().min(8)], e);
+            error!("Failed to spawn curl for {} — {}", &request_id[..request_id.len().min(8)], e);
             json!({
                 "type": "http_proxy_response",
                 "request_id": request_id,
-                "error": format!("{}", e)
+                "error": format!("Failed to run curl: {}", e)
             }).to_string()
         }
     }
