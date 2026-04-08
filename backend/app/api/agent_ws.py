@@ -10,6 +10,7 @@ from app.database import async_session
 from app.models.tenant import Tenant
 from app.models.user import User
 from app.services import audit_service, auth_service
+from app.config import settings
 from app.services.agent_connection_manager import agent_manager
 
 logger = logging.getLogger(__name__)
@@ -58,10 +59,14 @@ async def agent_websocket(websocket: WebSocket):
     # Register connection
     conn = await agent_manager.register(tenant_id, websocket, agent_id)
     agent_id = conn.agent_id
+    # Include CEZIH warmup URL so agent can establish mTLS session on connect
+    # (triggers single PIN prompt instead of prompting on first user action)
+    warmup_url = settings.CEZIH_FHIR_BASE_URL if settings.CEZIH_MODE == "real" else ""
     await websocket.send_json({
         "type": "connected",
         "message": "Agent spojen",
         "agent_id": agent_id,
+        "cezih_warmup_url": warmup_url,
     })
 
     # Start ping loop
@@ -92,6 +97,7 @@ async def agent_websocket(websocket: WebSocket):
                     card_inserted=msg.get("card_inserted"),
                     vpn_connected=msg.get("vpn_connected"),
                     card_holder=msg.get("card_holder"),
+                    readers=msg.get("readers"),
                 )
 
                 # Card removal detection: revoke only the affected doctor's sessions

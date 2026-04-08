@@ -37,7 +37,15 @@ def get_card_status(tenant_id: UUID, card_holder_name: str | None = None) -> dic
     # Check if any agent has VPN connected
     vpn_connected = any(c.vpn_connected for c in agent_manager.get_all(tenant_id))
 
-    # Find the agent with this doctor's card
+    # Check if any agent has a card reader attached
+    reader_available = any(len(c.readers) > 0 for c in agent_manager.get_all(tenant_id))
+
+    # Check if any agent has any card inserted (for status display)
+    all_conns = agent_manager.get_all(tenant_id)
+    any_card_inserted = any(c.card_inserted for c in all_conns)
+    any_card_holder = next((c.card_holder for c in all_conns if c.card_inserted and c.card_holder), None)
+
+    # Find the agent with this specific doctor's card
     my_card_inserted = False
     card_holder = None
     if card_holder_name:
@@ -49,7 +57,9 @@ def get_card_status(tenant_id: UUID, card_holder_name: str | None = None) -> dic
     return {
         "agent_connected": any_connected,
         "agents_count": agents_count,
-        "card_inserted": my_card_inserted,
-        "card_holder": card_holder,
+        "card_inserted": any_card_inserted,
+        "card_holder": any_card_holder,
+        "my_card_inserted": my_card_inserted,
         "vpn_connected": vpn_connected,
+        "reader_available": reader_available,
     }

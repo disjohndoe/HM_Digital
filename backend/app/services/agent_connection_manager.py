@@ -24,6 +24,7 @@ class AgentConnection:
     vpn_connected: bool = False
     card_holder: str | None = None
     card_removed_at: datetime | None = None
+    readers: list[dict] = field(default_factory=list)
 
 
 class AgentConnectionManager:
@@ -102,8 +103,13 @@ class AgentConnectionManager:
             return None
         target = card_holder_name.strip().upper()
         for conn in tenant_agents.values():
+            # Check top-level field (backward compat with old agents)
             if conn.card_inserted and conn.card_holder and conn.card_holder.strip().upper() == target:
                 return conn
+            # Check readers array (multi-reader support)
+            for reader in conn.readers:
+                if reader.get("card_inserted") and reader.get("card_holder", "").strip().upper() == target:
+                    return conn
         return None
 
     def is_connected(self, tenant_id: UUID) -> bool:
@@ -127,6 +133,7 @@ class AgentConnectionManager:
         card_inserted: bool | None = None,
         vpn_connected: bool | None = None,
         card_holder: str | None = None,
+        readers: list[dict] | None = None,
     ) -> None:
         conn = self.get_by_agent(tenant_id, agent_id)
         if not conn:
@@ -141,6 +148,8 @@ class AgentConnectionManager:
             conn.vpn_connected = vpn_connected
         if card_holder is not None:
             conn.card_holder = card_holder
+        if readers is not None:
+            conn.readers = readers
 
     async def send_to_agent(self, tenant_id: UUID, agent_id: str, message: dict) -> bool:
         conn = self.get_by_agent(tenant_id, agent_id)

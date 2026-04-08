@@ -1,10 +1,13 @@
 import secrets
+import time
 from datetime import datetime
+from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import settings
 from app.database import get_db
 from app.dependencies import get_current_user, require_roles
 from app.models.tenant import Tenant
@@ -75,6 +78,7 @@ async def get_cezih_status(
 
 class AgentSecretResponse(BaseModel):
     agent_secret: str
+    tenant_id: str
 
 
 @router.post("/generate-agent-secret", response_model=AgentSecretResponse)
@@ -85,10 +89,125 @@ async def generate_agent_secret(
     tenant = await db.get(Tenant, current_user.tenant_id)
     if not tenant:
         raise HTTPException(status_code=404, detail="Klinika nije pronađena")
+
+    # Disconnect all agents before changing the secret to prevent orphaned connections
+    all_conns = agent_manager.get_all(current_user.tenant_id)
+    for conn in all_conns:
+        try:
+            await conn.websocket.send_json({
+                "type": "secret_changed",
+                "message": "Tajni ključ je promijenjen. Ponovno uparivanje je potrebno.",
+            })
+        except Exception:
+            pass
+    for conn in all_conns:
+        await agent_manager.disconnect(current_user.tenant_id, conn.agent_id)
+
     secret = secrets.token_hex(32)
     tenant.agent_secret = secret
     await db.flush()
-    return AgentSecretResponse(agent_secret=secret)
+    return AgentSecretResponse(agent_secret=secret, tenant_id=str(tenant.id))
+
+
+# --- Pairing token flow ---
+# In-memory store: {token: {"tenant_id": str, "created_at": float}}
+# Single-use, 15-minute TTL — sufficient for single-server MVP.
+_pairing_tokens: dict[str, dict] = {}
+
+PAIRING_TTL_SECONDS = 15 * 60  # 15 minutes
+PAIRING_MAX_TOKENS = 100  # cap to prevent unbounded growth
+DEEP_LINK_SCHEME = "hm-agent"
+
+
+class PairingTokenResponse(BaseModel):
+    pairing_url: str
+    pairing_token: str
+
+
+class PairClaimRequest(BaseModel):
+    pairing_token: str
+
+
+class PairClaimResponse(BaseModel):
+    tenant_id: str
+    agent_secret: str
+    backend_url: str
+
+
+def _cleanup_expired_tokens() -> None:
+    """Remove expired pairing tokens and enforce max size cap."""
+    now = time.time()
+    expired = [t for t, v in _pairing_tokens.items() if now - v["created_at"] > PAIRING_TTL_SECONDS]
+    for t in expired:
+        _pairing_tokens.pop(t, None)
+    # Evict oldest if still over cap
+    while len(_pairing_tokens) > PAIRING_MAX_TOKENS:
+        oldest = min(_pairing_tokens, key=lambda t: _pairing_tokens[t]["created_at"])
+        _pairing_tokens.pop(oldest, None)
+
+
+def _get_backend_ws_url() -> str:
+    """Build the WebSocket URL agents should connect to."""
+    if settings.is_production and settings.DOMAIN:
+        return f"wss://{settings.DOMAIN}/"
+    return f"ws://localhost:{settings.PORT}/"
+
+
+@router.post("/pairing-token", response_model=PairingTokenResponse)
+async def create_pairing_token(
+    current_user: User = Depends(require_roles("admin")),
+    db: AsyncSession = Depends(get_db),
+):
+    """Generate a short-lived pairing token for agent deep-link connection."""
+    tenant = await db.get(Tenant, current_user.tenant_id)
+    if not tenant:
+        raise HTTPException(status_code=404, detail="Klinika nije pronađena")
+    if not tenant.agent_secret:
+        raise HTTPException(status_code=400, detail="Agent secret nije generiran. Generirajte ga prvo.")
+
+    _cleanup_expired_tokens()
+
+    token = secrets.token_hex(32)
+    _pairing_tokens[token] = {
+        "tenant_id": str(tenant.id),
+        "created_at": time.time(),
+    }
+    backend_url = _get_backend_ws_url()
+    pairing_url = f"{DEEP_LINK_SCHEME}://connect?token={token}&backend={quote(backend_url, safe='')}"
+    return PairingTokenResponse(pairing_url=pairing_url, pairing_token=token)
+
+
+@router.post("/pair/claim", response_model=PairClaimResponse)
+async def claim_pairing_token(
+    data: PairClaimRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """Public endpoint — agent exchanges a pairing token for tenant credentials.
+    Single-use, time-limited. No auth required."""
+    _cleanup_expired_tokens()
+
+    entry = _pairing_tokens.pop(data.pairing_token, None)
+    if not entry:
+        raise HTTPException(
+            status_code=410,
+            detail="Pairing token nije valjan ili je istekao. Generirajte novi.",
+        )
+
+    if time.time() - entry["created_at"] > PAIRING_TTL_SECONDS:
+        raise HTTPException(
+            status_code=410,
+            detail="Pairing token je istekao. Generirajte novi.",
+        )
+
+    tenant = await db.get(Tenant, entry["tenant_id"])
+    if not tenant or not tenant.agent_secret:
+        raise HTTPException(status_code=404, detail="Klinika nije pronađena")
+
+    return PairClaimResponse(
+        tenant_id=str(tenant.id),
+        agent_secret=tenant.agent_secret,
+        backend_url=_get_backend_ws_url(),
+    )
 
 
 class CardStatusResponse(BaseModel):
@@ -108,10 +227,16 @@ async def get_card_status_endpoint(
 ):
     """Get current smart card and agent status scoped to the calling user."""
     status_data = get_card_status(current_user.tenant_id, current_user.card_holder_name)
-    result = CardStatusResponse(**status_data)
+    result = CardStatusResponse(
+        agent_connected=status_data["agent_connected"],
+        agents_count=status_data["agents_count"],
+        card_inserted=status_data["my_card_inserted"],
+        card_holder=status_data["card_holder"],
+        vpn_connected=status_data["vpn_connected"],
+    )
 
     # If this user's card is inserted, set matched doctor to self
-    if status_data["card_inserted"] and status_data["card_holder"]:
+    if status_data["my_card_inserted"] and status_data["card_holder"]:
         result.matched_doctor_id = str(current_user.id)
         result.matched_doctor_name = f"{current_user.titula or ''} {current_user.ime} {current_user.prezime}".strip()
 
