@@ -107,6 +107,8 @@ class CezihFhirClient:
         body_str = _json.dumps(json_body) if json_body else None
 
         logger.info("CEZIH request via agent: %s %s", method, url)
+        if body_str:
+            logger.info("CEZIH request body (%d chars): %s", len(body_str), body_str[:5000])
         start = time.perf_counter()
 
         try:
@@ -174,8 +176,11 @@ class CezihFhirClient:
         if self._should_use_agent(path):
             return await self._request_via_agent(method, url, headers, params, json_body, timeout)
 
-        start = time.perf_counter()
         logger.info("CEZIH request: %s %s (attempt %d/%d)", method, url, _attempt + 1, max_attempts)
+        if json_body:
+            import json as _json_for_log
+            logger.info("CEZIH request body (%d chars): %s", len(_json_for_log.dumps(json_body)), _json_for_log.dumps(json_body, ensure_ascii=False)[:5000])
+        start = time.perf_counter()
 
         try:
             response = await self._client.request(

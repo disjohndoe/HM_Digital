@@ -96,7 +96,7 @@ async def build_message_bundle(
             "code": event_code,
         },
         "source": {"endpoint": f"urn:oid:{source_oid}" if source_oid else "urn:oid:0.0.0.0"},
-        "focus": [{"reference": f"urn:uuid:{resource_uuid}"}],
+        "focus": {"reference": f"urn:uuid:{resource_uuid}"},
     }
 
     if sender_org_code:
@@ -107,6 +107,7 @@ async def build_message_bundle(
 
     bundle: dict[str, Any] = {
         "resourceType": "Bundle",
+        "id": str(uuid.uuid4()),
         "type": "message",
         "timestamp": _now_iso(),
         "entry": [
