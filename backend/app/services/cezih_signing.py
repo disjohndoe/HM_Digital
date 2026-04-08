@@ -263,32 +263,27 @@ async def sign_document(
 
     doc_hash = _compute_hash(document_bytes)
 
-    # Create a JWS-like placeholder matching the structure from
-    # the Simplifier example: base64url(header) + base64url(payload) + dummy_sig
-    import base64 as _b64
-
-    # JWS header — RS256, placeholder kid
+    # Create a placeholder signature matching the Simplifier example format.
+    # FHIR base64Binary requires standard base64 (no dots, no base64url chars).
+    # The Simplifier example shows: base64(JWS_header) + base64(Bundle_JSON) + raw_sig_bytes
+    # all concatenated WITHOUT dots, using standard base64.
     jws_header = '{"kid":"placeholder-pending-extsigner","alg":"RS256"}'
-    header_b64 = _b64.urlsafe_b64encode(jws_header.encode()).decode().rstrip("=")
+    header_b64 = base64.b64encode(jws_header.encode()).decode()
+    payload_b64 = base64.b64encode(document_bytes).decode()
+    dummy_sig_b64 = base64.b64encode(b"PLACEHOLDER_SIG").decode()
 
-    # JWS payload — the Bundle JSON (without signature field)
-    payload_b64 = _b64.urlsafe_b64encode(document_bytes).decode().rstrip("=")
-
-    # Dummy signature bytes (not cryptographically valid)
-    dummy_sig = _b64.urlsafe_b64encode(b"PLACEHOLDER_SIGNATURE_FOR_BUNDLE_FORMAT_TEST").decode().rstrip("=")
-
-    # JWS Compact Serialization: header.payload.signature
-    jws = f"{header_b64}.{payload_b64}.{dummy_sig}"
+    # Concatenate without dots — standard base64 for FHIR base64Binary
+    signature_data = header_b64 + payload_b64 + dummy_sig_b64
 
     logger.warning(
         "CEZIH signing: using PLACEHOLDER signature (extsigner API format unknown). "
-        "Bundle hash=%.16s, JWS length=%d. CEZIH will reject this — testing Bundle format only.",
-        doc_hash, len(jws),
+        "Bundle hash=%.16s, sig length=%d. CEZIH will reject this — testing Bundle format only.",
+        doc_hash, len(signature_data),
     )
 
     return {
         "success": True,
-        "signature": jws,
+        "signature": signature_data,
         "signing_algorithm": _DEFAULT_ALGORITHM,
         "signed_at": datetime.now(UTC).isoformat(),
         "document_id": document_id,
