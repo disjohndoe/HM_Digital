@@ -275,7 +275,15 @@ async def sign_document(
         document_bytes = document_bytes.encode("utf-8")
 
     doc_hash = _compute_hash(document_bytes)
-    url = f"{signing_url.rstrip('/')}/services-router/gateway/extsigner/api/sign"
+
+    # Use the official CEZIH extsigner endpoint path
+    # Per CEZIH URL list: https://certpubws.cezih.hr/services-router/gateway/extsigner/api/sign
+    # If signing_url already contains the full path (includes "extsigner"), use it directly;
+    # otherwise append the standard path suffix.
+    if "extsigner" in signing_url:
+        url = signing_url
+    else:
+        url = f"{signing_url.rstrip('/')}/services-router/gateway/extsigner/api/sign"
 
     # CEZIH extsigner expects base64-encoded content, not pre-computed hash
     # Format based on CEZIH API spec
