@@ -76,14 +76,16 @@ class CezihFhirClient:
         return f"{base}{_GATEWAY_PREFIX}{clean}"
 
     async def _attach_auth(self, headers: dict[str, str]) -> dict[str, str]:
-        token = await get_oauth_token(client=self._client)
+        token = await get_oauth_token(client=self._client, tenant_id=self._tenant_id)
         headers["Authorization"] = f"Bearer {token}"
         return headers
 
     def _should_use_agent(self, path: str) -> bool:
-        """Check if this request should be routed through the agent (primary port = 8443)."""
-        if self._is_aux_service(path):
-            return False  # 9443 services work directly
+        """Check if this request should be routed through the agent.
+
+        Server has no VPN — ALL CEZIH requests (both 8443 and 9443) must
+        go through the agent when it is connected.
+        """
         if not self._tenant_id:
             return False
         from app.services.agent_connection_manager import agent_manager
