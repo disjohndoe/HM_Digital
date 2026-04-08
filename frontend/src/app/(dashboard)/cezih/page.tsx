@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useRef } from "react"
 import { useSearchParams } from "next/navigation"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
@@ -12,8 +12,12 @@ import { CezihActivityLog } from "@/components/cezih/activity-log"
 import { ForeignerRegistration } from "@/components/cezih/foreigner-registration"
 import { RegistryTools } from "@/components/cezih/registry-tools"
 import { toast } from "sonner"
+import { CreditCard, X, Loader2 } from "lucide-react"
+import { useAuth } from "@/lib/auth"
 import { usePermissions } from "@/lib/hooks/use-permissions"
 import { useSettingsCezihStatus, useGenerateAgentSecret, useCreatePairingToken } from "@/lib/hooks/use-settings"
+import { useCezihStatus } from "@/lib/hooks/use-cezih"
+import { useSelfBindCard, useSelfUnbindCard } from "@/lib/hooks/use-users"
 
 const VALID_TABS = ["stranci", "registri", "aktivnost", "postavke"]
 
@@ -21,8 +25,13 @@ export default function CezihPage() {
   const searchParams = useSearchParams()
   const tabParam = searchParams.get("tab")
   const defaultTab = tabParam && VALID_TABS.includes(tabParam) ? tabParam : "aktivnost"
+  const { user, refreshUser } = useAuth()
   const { canViewCezih } = usePermissions()
-  const { data: settingsStatus } = useSettingsCezihStatus()
+  const isAdmin = user?.role === "admin"
+  const { data: settingsStatus } = useSettingsCezihStatus(isAdmin)
+  const { data: cezihStatus } = useCezihStatus()
+  const selfBind = useSelfBindCard()
+  const selfUnbind = useSelfUnbindCard()
   const generateSecret = useGenerateAgentSecret()
   const createPairingToken = useCreatePairingToken()
   const [generatedSecret, setGeneratedSecret] = useState<string | null>(null)
@@ -31,12 +40,12 @@ export default function CezihPage() {
   const [pairingFallback, setPairingFallback] = useState(false)
 
   useEffect(() => {
-    if (settingsStatus?.agent_connected) {
+    if (cezihStatus?.agent_connected) {
       setGeneratedSecret(null)
       setGeneratedTenantId(null)
       setPairingFallback(false)
     }
-  }, [settingsStatus?.agent_connected])
+  }, [cezihStatus?.agent_connected])
 
   const handleGenerate = async () => {
     try {
@@ -72,6 +81,58 @@ export default function CezihPage() {
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Greška pri povezivanju agenta")
     }
+  }
+
+  // Suppress auto-rebind after manual unbind (until card is physically removed)
+  const [suppressAutoBind, setSuppressAutoBind] = useState(false)
+
+  // Clear suppress flag when card is physically removed
+  useEffect(() => {
+    if (!cezihStatus?.card_inserted) {
+      setSuppressAutoBind(false)
+    }
+  }, [cezihStatus?.card_inserted])
+
+  // Guard against double-fire of auto-bind mutation
+  const bindingInFlight = useRef(false)
+
+  // Auto-bind card when detected and user has no binding
+  useEffect(() => {
+    if (
+      !user?.card_holder_name &&
+      cezihStatus?.agent_connected &&
+      cezihStatus?.card_inserted &&
+      cezihStatus?.card_holder &&
+      !selfBind.isPending &&
+      !suppressAutoBind &&
+      !bindingInFlight.current
+    ) {
+      bindingInFlight.current = true
+      selfBind.mutate(undefined, {
+        onSuccess: () => {
+          bindingInFlight.current = false
+          toast.success("Kartica automatski povezana s vašim računom")
+          refreshUser()
+        },
+        onError: () => {
+          bindingInFlight.current = false
+        },
+      })
+    }
+  }, [user?.card_holder_name, cezihStatus?.agent_connected, cezihStatus?.card_inserted, cezihStatus?.card_holder, selfBind.isPending, suppressAutoBind])
+
+  const handleSelfUnbind = () => {
+    setSuppressAutoBind(true)
+    selfUnbind.mutate(undefined, {
+      onSuccess: () => {
+        toast.success("Kartica odpojena")
+        refreshUser()
+      },
+      onError: (err) => {
+        setSuppressAutoBind(false)
+        toast.error(err instanceof Error ? err.message : "Greška pri odpajanju kartice")
+      },
+    })
   }
 
   if (!canViewCezih) {
@@ -118,26 +179,79 @@ export default function CezihPage() {
           <div className="space-y-6">
             <Card>
               <CardHeader>
-                <CardTitle className="text-lg">Konfiguracija</CardTitle>
+                <CardTitle className="flex items-center gap-2 text-lg">
+                  <CreditCard className="h-5 w-5" />
+                  AKD Kartica
+                </CardTitle>
               </CardHeader>
-              <CardContent className="space-y-4">
-                <div className="grid gap-4 sm:grid-cols-2">
-                  <div>
-                    <p className="text-sm text-muted-foreground">Šifra ustanove</p>
-                    <p className="text-sm font-medium">
-                      {settingsStatus?.sifra_ustanove || "Nije postavljena"}
-                    </p>
+              <CardContent>
+                {user?.card_holder_name ? (
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-sm font-medium">{user.card_holder_name}</p>
+                      <p className="text-xs text-muted-foreground">Kartica je povezana s vašim računom</p>
+                    </div>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={handleSelfUnbind}
+                      disabled={selfUnbind.isPending}
+                    >
+                      {selfUnbind.isPending ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : (
+                        <X className="h-4 w-4" />
+                      )}
+                    </Button>
                   </div>
-                  <div>
-                    <p className="text-sm text-muted-foreground">OID</p>
-                    <p className="text-sm font-mono">
-                      {settingsStatus?.oid || "Nije postavljen"}
-                    </p>
+                ) : (
+                  <div className="flex items-center gap-2">
+                    {selfBind.isPending ? (
+                      <>
+                        <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+                        <p className="text-sm text-muted-foreground">Povezivanje kartice...</p>
+                      </>
+                    ) : suppressAutoBind ? (
+                      <p className="text-sm text-muted-foreground">
+                        Kartica odpojena. Izvadite i ponovno umetnite karticu za povezivanje.
+                      </p>
+                    ) : (
+                      <p className="text-sm text-muted-foreground">
+                        {!cezihStatus?.agent_connected
+                          ? "Čeka se povezivanje agenta..."
+                          : !cezihStatus?.card_inserted
+                            ? "Umetnite AKD karticu u čitač"
+                            : "Detektirana kartica, povezivanje..."}
+                      </p>
+                    )}
                   </div>
-                </div>
-
+                )}
               </CardContent>
             </Card>
+
+            {isAdmin && (
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-lg">Konfiguracija</CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    <div>
+                      <p className="text-sm text-muted-foreground">Šifra ustanove</p>
+                      <p className="text-sm font-medium">
+                        {settingsStatus?.sifra_ustanove || "Nije postavljena"}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-sm text-muted-foreground">OID</p>
+                      <p className="text-sm font-mono">
+                        {settingsStatus?.oid || "Nije postavljen"}
+                      </p>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            )}
 
             <Card>
               <CardHeader>
@@ -147,22 +261,17 @@ export default function CezihPage() {
                 <div className="flex items-center gap-2">
                   <span
                     className={`inline-block h-2.5 w-2.5 rounded-full ${
-                      settingsStatus?.agent_connected
+                      cezihStatus?.agent_connected
                         ? "bg-green-500"
                         : "bg-muted-foreground/50"
                     }`}
                   />
                   <span className="text-sm">
-                    {settingsStatus?.agent_connected
+                    {cezihStatus?.agent_connected
                       ? "Agent je povezan"
                       : "Agent nije povezan"}
                   </span>
                 </div>
-                {settingsStatus?.last_heartbeat && (
-                  <p className="text-xs text-muted-foreground">
-                    Zadnji heartbeat: {new Date(settingsStatus.last_heartbeat).toLocaleString("hr-HR")}
-                  </p>
-                )}
 
                 <div className="space-y-3">
                   <div className="flex items-center gap-2">
@@ -170,15 +279,15 @@ export default function CezihPage() {
                       size="sm"
                       variant="outline"
                       onClick={handleGenerate}
-                      disabled={generateSecret.isPending || settingsStatus?.agent_connected}
+                      disabled={generateSecret.isPending || cezihStatus?.agent_connected}
                     >
                       {generateSecret.isPending
                         ? "Generiranje..."
-                        : settingsStatus?.agent_connected
+                        : cezihStatus?.agent_connected
                           ? "Agent je već povezan"
                           : "Generiraj pristupne podatke"}
                     </Button>
-                    {generatedSecret && !settingsStatus?.agent_connected && (
+                    {generatedSecret && !cezihStatus?.agent_connected && (
                       <Button
                         size="sm"
                         onClick={handlePairAgent}

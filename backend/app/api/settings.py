@@ -83,7 +83,7 @@ class AgentSecretResponse(BaseModel):
 
 @router.post("/generate-agent-secret", response_model=AgentSecretResponse)
 async def generate_agent_secret(
-    current_user: User = Depends(require_roles("admin")),
+    current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     tenant = await db.get(Tenant, current_user.tenant_id)
@@ -155,7 +155,7 @@ def _get_backend_ws_url() -> str:
 
 @router.post("/pairing-token", response_model=PairingTokenResponse)
 async def create_pairing_token(
-    current_user: User = Depends(require_roles("admin")),
+    current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     """Generate a short-lived pairing token for agent deep-link connection."""

@@ -79,6 +79,28 @@ export function useAutoBindCard() {
   })
 }
 
+export function useSelfBindCard() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: () => api.post<User>("/users/me/card-binding", {}),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["users"] })
+      queryClient.invalidateQueries({ queryKey: ["cezih", "status"] })
+    },
+  })
+}
+
+export function useSelfUnbindCard() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: () => api.delete("/users/me/card-binding"),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["users"] })
+      queryClient.invalidateQueries({ queryKey: ["cezih", "status"] })
+    },
+  })
+}
+
 export function useCardStatus(enabled = true) {
   return useQuery({
     queryKey: ["card-status"],

@@ -87,6 +87,49 @@ async def create_user(
     return user
 
 
+@router.post("/me/card-binding", response_model=UserRead)
+async def self_bind_card(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Bind the currently inserted smart card to the calling user's account."""
+    agents = agent_manager.get_all(current_user.tenant_id)
+    if not agents:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Agent nije spojen")
+
+    conn = next((a for a in agents if a.card_inserted and a.card_holder), None)
+    if not conn:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Kartica nije umetnuta ni u jednom agentu")
+
+    # Check if card is already bound to another user in this tenant
+    existing = await db.execute(
+        select(User).where(
+            User.tenant_id == current_user.tenant_id,
+            User.card_holder_name == conn.card_holder,
+            User.id != current_user.id,
+            User.is_active.is_(True),
+        )
+    )
+    if existing.scalar_one_or_none():
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Ova kartica je već povezana s drugim korisnikom")
+
+    current_user.card_holder_name = conn.card_holder
+    await db.flush()
+    await db.refresh(current_user)
+    return current_user
+
+
+@router.delete("/me/card-binding", status_code=status.HTTP_204_NO_CONTENT)
+async def self_unbind_card(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Remove card binding from the calling user's account."""
+    current_user.card_holder_name = None
+    current_user.card_certificate_oib = None
+    await db.flush()
+
+
 @router.get("/{user_id}", response_model=UserRead)
 async def get_user(
     user_id: uuid.UUID,
@@ -147,6 +190,18 @@ async def bind_card(
     if not user or user.tenant_id != current_user.tenant_id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Korisnik nije pronadjen")
 
+    # Check if card is already bound to another user in this tenant
+    existing = await db.execute(
+        select(User).where(
+            User.tenant_id == current_user.tenant_id,
+            User.card_holder_name == data.card_holder_name,
+            User.id != user.id,
+            User.is_active.is_(True),
+        )
+    )
+    if existing.scalar_one_or_none():
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Ova kartica je već povezana s drugim korisnikom")
+
     user.card_holder_name = data.card_holder_name
     user.card_certificate_oib = data.card_certificate_oib
     await db.flush()
@@ -188,6 +243,18 @@ async def auto_bind_card(
     conn = next((a for a in agents if a.card_inserted and a.card_holder), None)
     if not conn:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Kartica nije umetnuta ni u jednom agentu")
+
+    # Check if card is already bound to another user in this tenant
+    existing = await db.execute(
+        select(User).where(
+            User.tenant_id == current_user.tenant_id,
+            User.card_holder_name == conn.card_holder,
+            User.id != user.id,
+            User.is_active.is_(True),
+        )
+    )
+    if existing.scalar_one_or_none():
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Ova kartica je već povezana s drugim korisnikom")
 
     user.card_holder_name = conn.card_holder
     await db.flush()

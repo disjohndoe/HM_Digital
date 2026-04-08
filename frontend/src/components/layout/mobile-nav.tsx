@@ -24,7 +24,8 @@ export function MobileNav({ open, onOpenChange }: { open: boolean; onOpenChange:
 
         <nav className="flex flex-col gap-1 px-2 pb-4">
           {NAV_ITEMS.filter((item) => !item.perm || perms[item.perm]).map((item) => {
-            const isActive = pathname === item.href || pathname.startsWith(item.href + "/");
+            const hrefPath = item.href.split("?")[0];
+            const isActive = pathname === hrefPath || pathname.startsWith(hrefPath + "/");
             return (
               <Link
                 key={item.href}
