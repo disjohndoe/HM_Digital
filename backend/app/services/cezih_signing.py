@@ -307,7 +307,7 @@ async def sign_document(
             "signing_algorithm": _DEFAULT_ALGORITHM,
             "signed_at": datetime.now(UTC).isoformat(),
             "document_id": document_id,
-            "raw_response": {"kid": kid, "jws_length": len(jws_compact)},
+            "raw_response": {"kid": kid, "sig_length": len(sig_b64)},
         }
 
     # No agent — refuse to sign
