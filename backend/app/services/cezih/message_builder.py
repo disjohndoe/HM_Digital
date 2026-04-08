@@ -145,26 +145,19 @@ async def add_signature(
 ) -> dict[str, Any]:
     """Add a digital signature to the Bundle.
 
-    In mock mode, adds a fake signature. In real mode, calls the signing service.
+    CEZIH signature format (verified from real CEZIH examples):
+      signature.data = base64( JOSE_header_JSON + Bundle_JSON + raw_crypto_sig )
+
+    Flow:
+    1. Add signature object with data="" to the bundle
+    2. Serialize the bundle (this is what gets signed)
+    3. Send to agent → agent builds JOSE header, signs, returns raw sig
+    4. Backend assembles: base64(header + bundle_json + raw_sig)
+    5. Set bundle.signature.data to the result
     """
-    from app.services.cezih_signing import sign_document
+    from app.services.cezih_signing import sign_bundle_for_cezih
 
-    # Serialize bundle without signature for hashing
-    bundle_bytes = json.dumps(bundle, ensure_ascii=False, sort_keys=True).encode("utf-8")
-
-    if sign_fn:
-        result = await sign_fn(bundle_bytes)
-    elif http_client:
-        result = await sign_document(http_client, bundle_bytes)
-    else:
-        from app.services.cezih.exceptions import CezihSigningError
-        raise CezihSigningError(
-            "Potpisivanje nije moguće: signing servis nije dostupan. "
-            "Provjerite VPN povezanost i konfiguraciju potpisnog servisa."
-        )
-
-    signature_data = result.get("signature", "")
-
+    # Add signature structure with empty data (this is included in what gets signed)
     bundle["signature"] = {
         "type": [
             {
@@ -174,10 +167,19 @@ async def add_signature(
         ],
         "when": _now_iso(),
         "who": practitioner_ref(practitioner_id),
-        "sigFormat": "application/pkcs7-signature",
-        "targetFormat": "application/fhir+json",
-        "data": signature_data,
+        "data": "",
     }
+
+    # Serialize the bundle WITH signature.data="" — this is the signing input
+    bundle_json_bytes = json.dumps(bundle, ensure_ascii=False).encode("utf-8")
+
+    if sign_fn:
+        result = await sign_fn(bundle_json_bytes)
+    else:
+        result = await sign_bundle_for_cezih(bundle_json_bytes, http_client=http_client)
+
+    # Set the signed data
+    bundle["signature"]["data"] = result.get("signature", "")
 
     return bundle
 
@@ -285,16 +287,35 @@ def build_encounter_update(
     *,
     encounter_id: str,
     patient_mbo: str,
+    nacin_prijema: str = "6",
     reason: str | None = None,
     practitioner_id: str = "",
     org_code: str = "",
+    diagnosis_case_id: str | None = None,
 ) -> dict[str, Any]:
-    """Build FHIR Encounter resource for visit update (event code 1.2)."""
+    """Build FHIR Encounter resource for visit update (event code 1.2).
+
+    CEZIH example includes: extension, identifier, class, subject, participant,
+    period, diagnosis, serviceProvider. See docs/CEZIH/Posjete/.
+    """
     encounter: dict[str, Any] = {
         "resourceType": "Encounter",
-        "id": encounter_id,
+        "extension": [
+            {
+                "extension": [
+                    {"url": "oznaka", "valueCoding": {"system": CS_SUDJELOVANJE_U_TROSKOVIMA, "code": "N"}},
+                    {"url": "sifra-oslobodjenja", "valueCoding": {"system": CS_SIFRA_OSLOBODJENJA, "code": "55"}},
+                ],
+                "url": EXT_TROSKOVI_SUDJELovanje,
+            },
+        ],
         "identifier": [{"system": ID_ENCOUNTER, "value": encounter_id}],
         "status": "in-progress",
+        "class": {
+            "system": CS_NACIN_PRIJEMA,
+            "code": nacin_prijema,
+            "display": NACIN_PRIJEMA_MAP.get(nacin_prijema, nacin_prijema),
+        },
         "subject": patient_ref(patient_mbo),
     }
     if org_code:
@@ -305,6 +326,13 @@ def build_encounter_update(
         }]
     if reason:
         encounter["reasonCode"] = [{"text": reason}]
+    if diagnosis_case_id:
+        encounter["diagnosis"] = [{
+            "condition": {
+                "type": "Condition",
+                "identifier": {"system": ID_CASE_GLOBAL, "value": diagnosis_case_id},
+            },
+        }]
     return encounter
 
 
@@ -312,24 +340,42 @@ def build_encounter_close(
     *,
     encounter_id: str,
     patient_mbo: str,
+    nacin_prijema: str = "6",
     practitioner_id: str = "",
     org_code: str = "",
+    diagnosis_case_id: str | None = None,
+    period_start: str | None = None,
 ) -> dict[str, Any]:
-    """Build FHIR Encounter resource for visit close (event code 1.3)."""
+    """Build FHIR Encounter resource for visit close (event code 1.3).
+
+    CEZIH example includes: identifier, status, class, period (start+end),
+    diagnosis, serviceProvider. See docs/CEZIH/Posjete/.
+    """
+    period: dict[str, str] = {"end": _now_iso()}
+    if period_start:
+        period["start"] = period_start
+
     encounter: dict[str, Any] = {
         "resourceType": "Encounter",
-        "id": encounter_id,
         "identifier": [{"system": ID_ENCOUNTER, "value": encounter_id}],
         "status": "finished",
-        "period": {"end": _now_iso()},
-        "subject": patient_ref(patient_mbo),
+        "class": {
+            "system": CS_NACIN_PRIJEMA,
+            "code": nacin_prijema,
+            "display": NACIN_PRIJEMA_MAP.get(nacin_prijema, nacin_prijema),
+        },
+        "period": period,
+        "serviceProvider": org_ref(org_code) if org_code else {},
     }
-    if org_code:
-        encounter["serviceProvider"] = org_ref(org_code)
-    if practitioner_id:
-        encounter["participant"] = [{
-            "individual": practitioner_ref(practitioner_id),
+    if diagnosis_case_id:
+        encounter["diagnosis"] = [{
+            "condition": {
+                "type": "Condition",
+                "identifier": {"system": ID_CASE_GLOBAL, "value": diagnosis_case_id},
+            },
         }]
+    if not org_code:
+        encounter.pop("serviceProvider", None)
     return encounter
 
 
@@ -337,26 +383,43 @@ def build_encounter_cancel(
     *,
     encounter_id: str,
     patient_mbo: str,
+    nacin_prijema: str = "6",
     reason: str | None = None,
     practitioner_id: str = "",
     org_code: str = "",
+    diagnosis_case_id: str | None = None,
+    period_start: str | None = None,
 ) -> dict[str, Any]:
-    """Build FHIR Encounter resource for visit cancellation/storno (event code 1.4)."""
+    """Build FHIR Encounter resource for visit cancellation/storno (event code 1.4).
+
+    CEZIH example includes: identifier, status, class, period (start+end),
+    diagnosis, serviceProvider. See docs/CEZIH/Posjete/.
+    """
     encounter: dict[str, Any] = {
         "resourceType": "Encounter",
-        "id": encounter_id,
         "identifier": [{"system": ID_ENCOUNTER, "value": encounter_id}],
         "status": "entered-in-error",
-        "subject": patient_ref(patient_mbo),
+        "class": {
+            "system": CS_NACIN_PRIJEMA,
+            "code": nacin_prijema,
+            "display": NACIN_PRIJEMA_MAP.get(nacin_prijema, nacin_prijema),
+        },
     }
+    period: dict[str, str] = {}
+    if period_start:
+        period["start"] = period_start
+    period["end"] = _now_iso()
+    if period:
+        encounter["period"] = period
     if org_code:
         encounter["serviceProvider"] = org_ref(org_code)
-    if practitioner_id:
-        encounter["participant"] = [{
-            "individual": practitioner_ref(practitioner_id),
+    if diagnosis_case_id:
+        encounter["diagnosis"] = [{
+            "condition": {
+                "type": "Condition",
+                "identifier": {"system": ID_CASE_GLOBAL, "value": diagnosis_case_id},
+            },
         }]
-    if reason:
-        encounter["reasonCode"] = [{"text": reason}]
     return encounter
 
 

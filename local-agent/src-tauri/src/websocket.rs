@@ -527,6 +527,63 @@ pub fn spawn_connection_task(
                                                     };
                                                     let _ = write.send(Message::Text(response.to_string().into())).await;
                                                 }
+                                                "sign_jws" => {
+                                                    // JWS signing: receive bundle JSON, build JOSE header + sign
+                                                    let rid = parsed.get("request_id").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                                                    let data_b64 = parsed.get("data").and_then(|v| v.as_str()).unwrap_or("");
+                                                    info!("Received sign_jws {} ({} chars)", &rid[..rid.len().min(8)], data_b64.len());
+
+                                                    let sign_result = {
+                                                        let data_bytes = match base64::engine::general_purpose::STANDARD.decode(data_b64) {
+                                                            Ok(b) => b,
+                                                            Err(e) => {
+                                                                let response = json!({
+                                                                    "type": "sign_jws_response",
+                                                                    "request_id": &rid,
+                                                                    "error": format!("Invalid base64 data: {}", e),
+                                                                });
+                                                                let _ = write.send(Message::Text(response.to_string().into())).await;
+                                                                continue;
+                                                            }
+                                                        };
+                                                        // sign_for_jws hashes internally with SHA-256
+                                                        tokio::task::spawn_blocking(move || {
+                                                            crate::signing::sign_for_jws(&data_bytes)
+                                                        }).await
+                                                    };
+
+                                                    let response = match sign_result {
+                                                        Ok(Ok(result)) => {
+                                                            info!("JWS signing OK: alg={}, sig={} bytes, kid={:.16}", result.algorithm, result.raw_signature.len(), result.kid);
+                                                            json!({
+                                                                "type": "sign_jws_response",
+                                                                "request_id": &rid,
+                                                                "raw_signature": base64::engine::general_purpose::STANDARD.encode(&result.raw_signature),
+                                                                "certificate": base64::engine::general_purpose::STANDARD.encode(&result.certificate_der),
+                                                                "kid": result.kid,
+                                                                "algorithm": result.algorithm,
+                                                            })
+                                                        }
+                                                        Ok(Err(e)) => {
+                                                            // NCrypt failed — try CMS fallback
+                                                            warn!("JWS signing failed ({}), trying CMS fallback", e);
+                                                            json!({
+                                                                "type": "sign_jws_response",
+                                                                "request_id": &rid,
+                                                                "error": e,
+                                                            })
+                                                        }
+                                                        Err(e) => {
+                                                            error!("JWS signing task panicked: {}", e);
+                                                            json!({
+                                                                "type": "sign_jws_response",
+                                                                "request_id": &rid,
+                                                                "error": format!("Internal error: {}", e),
+                                                            })
+                                                        }
+                                                    };
+                                                    let _ = write.send(Message::Text(response.to_string().into())).await;
+                                                }
                                                 "http_proxy_request" => {
                                                     let rid = parsed.get("request_id").and_then(|v| v.as_str()).unwrap_or("").to_string();
                                                     info!("HTTP proxy request {} — {} {}",

@@ -345,6 +345,129 @@ def invalidate_signing_token() -> None:
     _signing_token_acquired_at = 0.0
 
 
+async def sign_bundle_for_cezih(
+    bundle_json_bytes: bytes,
+    *,
+    http_client: httpx.AsyncClient | None = None,
+) -> dict:
+    """Sign a FHIR Bundle for CEZIH using the agent's smart card.
+
+    CEZIH signature format (verified from real CEZIH examples):
+      signature.data = base64( JOSE_header_JSON + Bundle_JSON + raw_signature_bytes )
+
+    Where:
+      - JOSE header: {"kid":"<thumbprint>","alg":"<ES256|RS256>"}
+      - Bundle JSON: the complete Bundle with signature.data = ""
+      - Raw signature: NCryptSignHash output (ECDSA r||s or RSA PKCS1)
+
+    The agent computes SHA-256(JOSE_header + Bundle_JSON) and signs the hash.
+    """
+    if not _should_use_agent():
+        raise CezihSigningError("Neispravna CEZIH konekcija — agent nije spojen")
+
+    from app.services.agent_connection_manager import agent_manager
+    from app.services.cezih.client import current_tenant_id
+
+    tenant_id = current_tenant_id.get()
+
+    # The agent receives the bundle JSON and internally:
+    # 1. Finds the cert → gets kid, algorithm
+    # 2. Builds JOSE header
+    # 3. Computes SHA-256(jose_header_bytes + bundle_json_bytes)
+    # 4. Signs the hash via NCryptSignHash
+    # 5. Returns: raw_signature, kid, algorithm, certificate
+    #
+    # But since the agent doesn't know the JOSE header until it reads the cert,
+    # and the signing input includes the JOSE header, we do this:
+    # - Send bundle_json to agent
+    # - Agent builds header, computes full signing input, signs, returns everything
+    data_b64 = base64.b64encode(bundle_json_bytes).decode("ascii")
+
+    logger.info("CEZIH JWS signing via agent (bundle_size=%d)", len(bundle_json_bytes))
+
+    try:
+        result = await agent_manager.sign_jws(
+            tenant_id,
+            data_base64=data_b64,
+            timeout=30.0,
+        )
+    except RuntimeError as e:
+        raise CezihSigningError(f"Agent JWS signing failed: {e}") from e
+
+    if "error" in result:
+        logger.warning("Agent sign_jws failed: %s — falling back to CMS", result["error"])
+        return await _sign_bundle_cms_fallback(bundle_json_bytes)
+
+    raw_sig_b64 = result.get("raw_signature", "")
+    kid = result.get("kid", "unknown")
+    algorithm = result.get("algorithm", "ES256")
+
+    raw_sig_bytes = base64.b64decode(raw_sig_b64)
+    logger.info("Agent JWS signing OK: alg=%s, sig=%d bytes, kid=%.16s", algorithm, len(raw_sig_bytes), kid)
+
+    # Build JOSE header (must match what agent signed over)
+    jose_header = json.dumps({"kid": kid, "alg": algorithm}, separators=(",", ":"), ensure_ascii=True)
+    jose_header_bytes = jose_header.encode("utf-8")
+
+    # Assemble: base64( jose_header_bytes + bundle_json_bytes + raw_sig_bytes )
+    signed_payload = jose_header_bytes + bundle_json_bytes + raw_sig_bytes
+    signature_data = base64.b64encode(signed_payload).decode("ascii")
+
+    logger.info("CEZIH signature assembled: header=%d + bundle=%d + sig=%d = %d bytes → %d b64 chars",
+                len(jose_header_bytes), len(bundle_json_bytes), len(raw_sig_bytes),
+                len(signed_payload), len(signature_data))
+
+    return {
+        "success": True,
+        "signature": signature_data,
+        "signing_algorithm": algorithm,
+        "signed_at": datetime.now(UTC).isoformat(),
+        "kid": kid,
+    }
+
+
+async def _sign_bundle_cms_fallback(bundle_json_bytes: bytes) -> dict:
+    """Fallback: sign with CMS/PKCS#7 if NCrypt JWS signing is unavailable."""
+    if not _should_use_agent():
+        raise CezihSigningError("Neispravna CEZIH konekcija — agent nije spojen")
+
+    from app.services.agent_connection_manager import agent_manager
+    from app.services.cezih.client import current_tenant_id
+
+    tenant_id = current_tenant_id.get()
+    data_b64 = base64.b64encode(bundle_json_bytes).decode("ascii")
+
+    logger.info("CEZIH CMS fallback signing (bundle_size=%d)", len(bundle_json_bytes))
+
+    try:
+        result = await agent_manager.sign_data(
+            tenant_id,
+            data_base64=data_b64,
+            timeout=30.0,
+        )
+    except RuntimeError as e:
+        raise CezihSigningError(f"Agent CMS signing failed: {e}") from e
+
+    if "error" in result:
+        raise CezihSigningError(
+            f"Smart card signing failed: {result['error']}",
+            signing_service_error=result["error"],
+        )
+
+    sig_b64 = result.get("signature", "")
+    kid = result.get("kid", "unknown")
+
+    logger.info("CMS fallback signing OK (kid=%.16s, sig_len=%d)", kid, len(sig_b64))
+
+    return {
+        "success": True,
+        "signature": sig_b64,
+        "signing_algorithm": "CMS/PKCS7",
+        "signed_at": datetime.now(UTC).isoformat(),
+        "kid": kid,
+    }
+
+
 async def sign_document(
     client: httpx.AsyncClient,
     document_bytes: bytes | str,
@@ -352,72 +475,10 @@ async def sign_document(
     document_id: str | None = None,
     signing_reason: str = "CEZIH clinical document",
 ) -> dict:
-    """Sign a document using the agent's smart card (local CryptoAPI signing).
-
-    Flow:
-    1. Send data to agent via WebSocket sign_request
-    2. Agent signs with AKD smart card (Windows CryptoAPI + RSA)
-    3. Agent returns raw RSA signature + certificate thumbprint (kid)
-    4. Backend creates JWS: base64url(header).base64url(payload).base64url(sig)
-    5. Base64-encode entire JWS for FHIR base64Binary in Bundle.signature.data
-
-    Falls back to placeholder if agent is not connected.
-    """
+    """Legacy sign_document — delegates to sign_bundle_for_cezih."""
     if isinstance(document_bytes, str):
         document_bytes = document_bytes.encode("utf-8")
-
-    doc_hash = _compute_hash(document_bytes)
-
-    if _should_use_agent():
-        # Route signing through the agent's smart card
-        from app.services.agent_connection_manager import agent_manager
-        from app.services.cezih.client import current_tenant_id
-
-        tenant_id = current_tenant_id.get()
-        data_b64 = base64.b64encode(document_bytes).decode("ascii")
-
-        logger.info("CEZIH signing via agent smart card (hash=%.16s, data_size=%d)", doc_hash, len(document_bytes))
-
-        try:
-            result = await agent_manager.sign_data(
-                tenant_id,
-                data_base64=data_b64,
-                timeout=30.0,
-            )
-        except RuntimeError as e:
-            raise CezihSigningError(f"Agent signing failed: {e}") from e
-
-        logger.info("Agent sign_response: %s", {k: v[:100] if isinstance(v, str) else v for k, v in result.items()})
-
-        if "error" in result:
-            logger.error("Smart card signing failed: %s", result["error"])
-            raise CezihSigningError(
-                f"Smart card signing failed: {result['error']}",
-                signing_service_error=result["error"],
-            )
-
-        sig_b64 = result.get("signature", "")
-        kid = result.get("kid", "unknown")
-
-        logger.info("Agent signing successful (kid=%.16s, sig_len=%d)", kid, len(sig_b64))
-
-        # Agent returns CMS/PKCS#7 detached signature (already base64-encoded).
-        # Send directly as FHIR signature.data — CMS is a valid signature format.
-        signature_data = sig_b64
-
-        logger.info("Using CMS/PKCS#7 signature directly (kid=%.16s, len=%d)", kid, len(sig_b64))
-
-        return {
-            "success": True,
-            "signature": signature_data,
-            "signing_algorithm": "CMS/PKCS7",
-            "signed_at": datetime.now(UTC).isoformat(),
-            "document_id": document_id,
-            "raw_response": {"kid": kid, "sig_length": len(sig_b64)},
-        }
-
-    # No agent — refuse to sign
-    raise CezihSigningError("Neispravna CEZIH konekcija")
+    return await sign_bundle_for_cezih(document_bytes)
 
 
 async def sign_health_check(client: httpx.AsyncClient) -> dict:

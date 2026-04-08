@@ -213,6 +213,43 @@ class AgentConnectionManager:
         finally:
             _pending_proxy.pop(request_id, None)
 
+    async def sign_jws(
+        self,
+        tenant_id: UUID,
+        *,
+        data_base64: str,
+        timeout: float = 30.0,
+    ) -> dict:
+        """Send data to the agent for JWS signing (NCryptSignHash).
+
+        The agent signs using raw NCrypt API → returns raw ECDSA/RSA signature
+        + certificate DER + kid + algorithm.  Used for CEZIH signature format:
+        base64(JOSE_header_JSON + Bundle_JSON + raw_signature_bytes).
+        """
+        conn = self.get_any_connected(tenant_id)
+        if not conn:
+            raise RuntimeError("No agent connected for this tenant")
+
+        request_id = str(_uuid.uuid4())
+        loop = asyncio.get_event_loop()
+        future: asyncio.Future = loop.create_future()
+        _pending_proxy[request_id] = future
+
+        message = {
+            "type": "sign_jws",
+            "request_id": request_id,
+            "data": data_base64,
+        }
+
+        try:
+            await conn.websocket.send_json(message)
+            result = await asyncio.wait_for(future, timeout=timeout)
+            return result
+        except TimeoutError:
+            raise RuntimeError(f"Agent JWS signing timed out after {timeout}s")
+        finally:
+            _pending_proxy.pop(request_id, None)
+
     async def sign_data(
         self,
         tenant_id: UUID,
