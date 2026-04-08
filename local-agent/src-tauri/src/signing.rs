@@ -183,16 +183,16 @@ unsafe fn sign_for_jws_inner(bundle_json: &[u8]) -> Result<JwsSignResult, String
 
         sig_buf.truncate(actual_len as usize);
 
-        // Assemble JWS compact: header.payload.signature
+        // Assemble signature data: concatenate base64url parts WITHOUT dots.
+        // CEZIH real example format: b64url(header) + b64url(payload) + b64url(sig)
+        // No dots (HAPI rejects dots as invalid base64Binary).
+        // No extra base64 encoding (CEZIH can't parse double-encoded JWS).
+        // The signing input used dots (per JWS RFC 7515), but storage format omits them.
         let sig_b64url = b64url.encode(&sig_buf);
-        let jws_compact = format!("{}.{}", signing_input, sig_b64url);
+        let jws_base64 = format!("{}{}{}", header_b64url, payload_b64url, sig_b64url);
 
-        // Base64-encode the entire JWS for FHIR base64Binary.
-        // HAPI FHIR validates data as base64Binary — dots in JWS are invalid base64.
-        let jws_base64 = b64std.encode(jws_compact.as_bytes());
-
-        info!("JWS: complete! alg={}, sig={} bytes, JWS={} chars, b64={} chars",
-              algorithm, sig_buf.len(), jws_compact.len(), jws_base64.len());
+        info!("JWS: complete! alg={}, sig={} bytes, data={} chars (no dots, no extra b64)",
+              algorithm, sig_buf.len(), jws_base64.len());
 
         // Cleanup
         for (ctx, _) in &certs {
