@@ -214,8 +214,8 @@ export function EkartonView({ patientId, patientMbo, alergije }: EkartonViewProp
               {insData.osiguravatelj && (
                 <span className="text-sm">{insData.osiguravatelj}</span>
               )}
-              {insData.broj_osiguranja && (
-                <span className="text-sm font-mono">{insData.broj_osiguranja}</span>
+              {insData.oib && (
+                <span className="text-sm font-mono">OIB: {insData.oib}</span>
               )}
               <span className="text-xs text-muted-foreground">· Upravo provjereno</span>
               <Button size="sm" variant="ghost" className="h-6 text-xs px-2" onClick={handleCheckInsurance}>
