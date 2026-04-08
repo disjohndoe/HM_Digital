@@ -304,24 +304,22 @@ async def cezih_status(tenant_id=None, *, http_client=None) -> dict:
         mock_result["mode"] = settings.CEZIH_MODE
         return mock_result
 
-    # Real mode
-    connected = False
-    if http_client:
-        try:
-            status_result = await real_service.get_status(http_client)
-            connected = status_result.get("connected", False)
-        except CezihError:
-            connected = False
-
+    # Real mode — server cannot reach CEZIH directly (no VPN),
+    # so derive connectivity from agent + VPN status.
     from app.services.agent_connection_manager import agent_manager
 
     agent_connected = False
+    vpn_connected = False
     last_heartbeat = None
     if tenant_id:
         agent_connected = agent_manager.is_connected(tenant_id)
         conn = agent_manager.get_any_connected(tenant_id)
         if conn:
             last_heartbeat = conn.last_heartbeat
+            vpn_connected = conn.vpn_connected
+
+    # CEZIH is reachable when the agent is connected with an active VPN tunnel
+    connected = agent_connected and vpn_connected
 
     return {
         "mock": False,
