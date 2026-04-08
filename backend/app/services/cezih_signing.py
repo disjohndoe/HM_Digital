@@ -300,35 +300,59 @@ async def sign_document(
         # Route through agent if connected (server has no VPN)
         # Port 8443: agent handles mTLS auth via smart card — no Bearer token needed
         if _should_use_agent():
-            # PROBE: Try getSignedDocuments to see API output format
-            base_url = url.rsplit("/sign", 1)[0] if url.endswith("/sign") else url
-            get_docs_url = f"{base_url.rsplit('/api/', 1)[0]}/api/getSignedDocuments"
-            try:
-                probe_result = await _request_via_agent(
-                    method="GET",
-                    url=get_docs_url,
-                    headers={"Accept": "application/json, */*"},
-                    form_data=None,
-                    json_body=None,
-                    timeout=10,
-                )
-                logger.info("CEZIH getSignedDocuments probe -> %d: %s",
-                            probe_result.get("status_code", 0),
-                            probe_result.get("body", "")[:3000])
-            except Exception as probe_err:
-                logger.info("CEZIH getSignedDocuments probe -> error: %s", probe_err)
+            # PROBE: Try getSignedDocuments and other endpoints
+            signing_base = signing_url.rstrip("/")
+            probe_urls = [
+                f"{signing_base}/services-router/gateway/extsigner/api/getSignedDocuments",
+                f"{signing_base}/services-router/gateway/extsigner/api/sign",  # GET to see allowed methods
+            ]
+            for probe_url in probe_urls:
+                try:
+                    probe_result = await _request_via_agent(
+                        method="GET",
+                        url=probe_url,
+                        headers={"Accept": "application/json, */*"},
+                        form_data=None,
+                        json_body=None,
+                        timeout=10,
+                    )
+                    logger.info("CEZIH probe GET %s -> %d: %s",
+                                probe_url,
+                                probe_result.get("status_code", 0),
+                                str(probe_result.get("body", ""))[:3000])
+                except Exception as probe_err:
+                    logger.info("CEZIH probe GET %s -> error: %s", probe_url, probe_err)
 
-            # Try sending hash as plain text (not JSON)
-            logger.info("CEZIH signing request: POST %s (text/plain, hash=%.16s...)", url, doc_hash)
-            body = await _request_via_agent(
-                method="POST",
-                url=url,
-                headers={"Content-Type": "text/plain", "Accept": "application/json"},
-                form_data=None,
-                json_body=None,
-                timeout=settings.CEZIH_TIMEOUT,
-                raw_body=doc_hash,
-            )
+            # Batch test field names — try each one and log result
+            test_fields = ["toBeSigned", "toSign", "signData", "input", "payload", "request", "value", "bytes"]
+            for field_name in test_fields:
+                try:
+                    test_payload = {field_name: doc_hash}
+                    test_result = await _request_via_agent(
+                        method="POST",
+                        url=url,
+                        headers={"Content-Type": "application/json", "Accept": "application/json"},
+                        form_data=None,
+                        json_body=test_payload,
+                        timeout=10,
+                    )
+                    test_status = test_result.get("status_code", 0)
+                    test_body = test_result.get("body", "")
+                    logger.info("CEZIH sign field '%s' -> %d: %s", field_name, test_status, str(test_body)[:500])
+                    if test_status < 400:
+                        # Found a working field! Use this result.
+                        body = test_result
+                        body["status_code"] = test_status
+                        break
+                except Exception as field_err:
+                    err_msg = str(field_err)
+                    if "Unexpected field" in err_msg:
+                        logger.info("CEZIH sign field '%s' -> REJECTED", field_name)
+                    else:
+                        logger.info("CEZIH sign field '%s' -> error: %s", field_name, err_msg[:200])
+            else:
+                # None worked — use last attempt as the error
+                raise CezihSigningError("All field name attempts rejected by extsigner")
             duration_ms = (time.perf_counter() - start) * 1000
             logger.info("CEZIH signing response via agent: success (%.1fms)", duration_ms)
             # _request_via_agent raises CezihSigningError for 4xx/5xx, so body is successful response
