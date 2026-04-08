@@ -1,9 +1,12 @@
 "use client"
 
+import { useEffect, useRef, useState } from "react"
 import {
   AlertTriangle,
+  Calendar,
   CheckCircle2,
   Download,
+  FileSearch,
   FileText,
   Loader2,
   Pill,
@@ -17,16 +20,25 @@ import { Badge } from "@/components/ui/badge"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Separator } from "@/components/ui/separator"
 import { Skeleton } from "@/components/ui/skeleton"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import { MockBadge } from "@/components/cezih/mock-badge"
 import {
   usePatientCezihSummary,
   useRetrieveCases,
   useRetrieveDocument,
+  useListVisits,
+  useDocumentSearch,
   useInsuranceCheck,
 } from "@/lib/hooks/use-cezih"
-import { OSIGURANJE_STATUS } from "@/lib/constants"
+import { OSIGURANJE_STATUS, ICD_CHAPTERS } from "@/lib/constants"
 import { useRecordTypeMaps } from "@/lib/hooks/use-record-types"
-import { formatDateTimeHR } from "@/lib/utils"
+import { formatDateHR, formatDateTimeHR } from "@/lib/utils"
 
 const CLINICAL_STATUS_COLORS: Record<string, string> = {
   active: "bg-blue-100 text-blue-800",
@@ -42,26 +54,85 @@ const CLINICAL_STATUS_LABELS: Record<string, string> = {
   resolved: "Zatvoren",
 }
 
+const VISIT_STATUS_COLORS: Record<string, string> = {
+  "in-progress": "bg-blue-100 text-blue-800",
+  finished: "bg-green-100 text-green-800",
+  planned: "bg-amber-100 text-amber-800",
+  cancelled: "bg-gray-100 text-gray-800",
+  "entered-in-error": "bg-red-100 text-red-800",
+}
+
+const VISIT_STATUS_LABELS: Record<string, string> = {
+  "in-progress": "U tijeku",
+  finished: "Završena",
+  planned: "Planirana",
+  cancelled: "Otkazana",
+  "entered-in-error": "Pogreška",
+}
+
+const DOC_STATUS_COLORS: Record<string, string> = {
+  current: "bg-green-100 text-green-800",
+  superseded: "bg-gray-100 text-gray-800",
+  "entered-in-error": "bg-red-100 text-red-800",
+  Otvorena: "bg-green-100 text-green-800",
+  Zatvorena: "bg-gray-100 text-gray-800",
+  Pogreška: "bg-red-100 text-red-800",
+}
+
+function matchesIcdFilter(code: string, prefixStr: string): boolean {
+  if (!prefixStr) return true
+  const prefixes = prefixStr.split(",")
+  return prefixes.some((p) => code.startsWith(p))
+}
+
 interface EkartonViewProps {
   patientId: string
   patientMbo: string | null
   alergije: string | null
-  fetchTime: string | null
 }
 
-export function EkartonView({ patientId, patientMbo, alergije, fetchTime }: EkartonViewProps) {
+export function EkartonView({ patientId, patientMbo, alergije }: EkartonViewProps) {
   const { data: summary, isLoading } = usePatientCezihSummary(patientId)
   const casesQuery = useRetrieveCases(patientMbo ?? "")
+  const visitsQuery = useListVisits(patientMbo ?? "")
+  const docsQuery = useDocumentSearch({ mbo: patientMbo ?? undefined })
   const retrieveDoc = useRetrieveDocument()
-  const insuranceCheck = useInsuranceCheck()
+  const insuranceMutation = useInsuranceCheck()
   const { tipLabelMap } = useRecordTypeMaps()
+
+  // ICD filter — persisted in localStorage
+  const [icdFilter, setIcdFilter] = useState(() => {
+    if (typeof window === "undefined") return ""
+    return localStorage.getItem("ekarton-icd-filter") || ""
+  })
+
+  const handleIcdFilterChange = (value: string | null) => {
+    const v = !value || value === "__all__" ? "" : value
+    setIcdFilter(v)
+    localStorage.setItem("ekarton-icd-filter", v)
+  }
+
+  // Auto-check insurance on mount only if no fresh cached data (< 30 min)
+  const didAutoCheck = useRef(false)
+  useEffect(() => {
+    if (didAutoCheck.current || !patientMbo) return
+    const lastChecked = summary?.insurance?.last_checked
+    if (lastChecked) {
+      const ageMinutes = (Date.now() - new Date(lastChecked).getTime()) / 60000
+      if (ageMinutes < 30) {
+        didAutoCheck.current = true
+        return // cached result is fresh enough
+      }
+    }
+    // If summary hasn't loaded yet, skip — this effect will re-run when it does
+    if (!summary) return
+    didAutoCheck.current = true
+    insuranceMutation.mutate(patientMbo)
+  }, [patientMbo, summary?.insurance?.last_checked])
 
   const handleCheckInsurance = () => {
     if (!patientMbo) return
-    insuranceCheck.mutate(patientMbo, {
-      onSuccess: () => toast.success("Osiguranje provjereno"),
-      onError: (err) => toast.error(err.message),
-    })
+    insuranceMutation.mutate(patientMbo)
   }
 
   const handleDownloadPdf = (referenceId: string) => {
@@ -92,7 +163,12 @@ export function EkartonView({ patientId, patientMbo, alergije, fetchTime }: Ekar
   }
 
   const insurance = summary?.insurance
+  const insData = insuranceMutation.data
+  const insPending = insuranceMutation.isPending
+  const insError = insuranceMutation.error
   const cases = casesQuery.data?.cases || []
+  const visits = visitsQuery.data?.visits || []
+  const documents = docsQuery.data || []
   const eNalazHistory = summary?.e_nalaz_history || []
   const eReceptHistory = summary?.e_recept_history || []
   const statusConfig = insurance?.status_osiguranja
@@ -100,6 +176,8 @@ export function EkartonView({ patientId, patientMbo, alergije, fetchTime }: Ekar
     : null
 
   const activeCases = cases.filter((c) => c.clinical_status !== "resolved")
+  const filteredCases = activeCases.filter((c) => matchesIcdFilter(c.icd_code, icdFilter))
+  const activeVisits = visits.filter((v) => v.status === "in-progress" || v.status === "planned")
 
   return (
     <Card>
@@ -111,34 +189,63 @@ export function EkartonView({ patientId, patientMbo, alergije, fetchTime }: Ekar
         <MockBadge />
       </CardHeader>
       <CardContent className="space-y-4">
-        {/* Osiguranje */}
+        {/* 1. Osiguranje */}
         <div className="space-y-2">
           <div className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
             <Shield className="h-4 w-4" />
             Osiguranje
           </div>
-          {insurance?.status_osiguranja ? (
+          {insPending ? (
+            <div className="flex items-center gap-2">
+              <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+              <span className="text-sm text-muted-foreground">Provjera osiguranja...</span>
+            </div>
+          ) : insError ? (
             <div className="flex items-center gap-2 flex-wrap">
-              <Badge className={statusConfig?.color || ""}>
+              <Badge className="bg-red-100 text-red-800">Greška</Badge>
+              <span className="text-sm text-muted-foreground">{insError.message}</span>
+              <Button size="sm" variant="outline" onClick={handleCheckInsurance} disabled={!patientMbo}>
+                Pokušaj ponovo
+              </Button>
+            </div>
+          ) : insData?.status_osiguranja ? (
+            <div className="flex items-center gap-2 flex-wrap">
+              <Badge className={OSIGURANJE_STATUS[insData.status_osiguranja]?.color || "bg-gray-100 text-gray-800"}>
+                {OSIGURANJE_STATUS[insData.status_osiguranja]?.label || insData.status_osiguranja}
+              </Badge>
+              {insData.osiguravatelj && (
+                <span className="text-sm">{insData.osiguravatelj}</span>
+              )}
+              {insData.broj_osiguranja && (
+                <span className="text-sm font-mono">{insData.broj_osiguranja}</span>
+              )}
+              <span className="text-xs text-muted-foreground">· Upravo provjereno</span>
+              <Button size="sm" variant="ghost" className="h-6 text-xs px-2" onClick={handleCheckInsurance}>
+                Osvježi
+              </Button>
+            </div>
+          ) : insurance?.status_osiguranja ? (
+            <div className="flex items-center gap-2 flex-wrap">
+              <Badge className={statusConfig?.color || "bg-gray-100 text-gray-800"}>
                 {statusConfig?.label || insurance.status_osiguranja}
               </Badge>
               {insurance.osiguravatelj && (
                 <span className="text-sm">{insurance.osiguravatelj}</span>
               )}
+              {insurance.broj_osiguranja && (
+                <span className="text-sm font-mono">{insurance.broj_osiguranja}</span>
+              )}
               <span className="text-xs text-muted-foreground">
-                · Provjereno {fetchTime ? formatDateTimeHR(fetchTime) : insurance.last_checked ? formatDateTimeHR(insurance.last_checked) : ""}
+                {insurance.last_checked && `· Provjereno ${formatDateTimeHR(insurance.last_checked)}`}
               </span>
+              <Button size="sm" variant="ghost" className="h-6 text-xs px-2" onClick={handleCheckInsurance}>
+                Osvježi
+              </Button>
             </div>
           ) : (
             <div className="flex items-center gap-2">
               <span className="text-sm text-muted-foreground">Nije provjereno</span>
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={handleCheckInsurance}
-                disabled={insuranceCheck.isPending || !patientMbo}
-              >
-                {insuranceCheck.isPending && <Loader2 className="mr-1 h-3 w-3 animate-spin" />}
+              <Button size="sm" variant="outline" onClick={handleCheckInsurance} disabled={insPending || !patientMbo}>
                 Provjeri
               </Button>
             </div>
@@ -147,7 +254,7 @@ export function EkartonView({ patientId, patientMbo, alergije, fetchTime }: Ekar
 
         <Separator />
 
-        {/* Alergije */}
+        {/* 2. Alergije */}
         <div className="space-y-2">
           <div className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
             <AlertTriangle className="h-4 w-4" />
@@ -164,15 +271,33 @@ export function EkartonView({ patientId, patientMbo, alergije, fetchTime }: Ekar
 
         <Separator />
 
-        {/* Aktivne dijagnoze */}
+        {/* 3. Aktivne dijagnoze — with ICD chapter filter */}
         <div className="space-y-2">
-          <div className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
-            <Stethoscope className="h-4 w-4" />
-            Aktivne dijagnoze
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
+              <Stethoscope className="h-4 w-4" />
+              Aktivne dijagnoze
+              {activeCases.length > 0 && (
+                <Badge variant="outline" className="text-xs ml-1">
+                  {icdFilter ? `${filteredCases.length}/${activeCases.length}` : activeCases.length}
+                </Badge>
+              )}
+            </div>
             {activeCases.length > 0 && (
-              <Badge variant="outline" className="text-xs ml-1">
-                {activeCases.length}
-              </Badge>
+              <Select value={icdFilter || "__all__"} onValueChange={handleIcdFilterChange}>
+                <SelectTrigger className="h-7 w-[180px] text-xs">
+                  <SelectValue placeholder="Sve dijagnoze">
+                    {ICD_CHAPTERS.find((ch) => (ch.prefix || "__all__") === (icdFilter || "__all__"))?.label || "Sve dijagnoze"}
+                  </SelectValue>
+                </SelectTrigger>
+                <SelectContent>
+                  {ICD_CHAPTERS.map((ch) => (
+                    <SelectItem key={ch.prefix || "__all__"} value={ch.prefix || "__all__"} className="text-xs">
+                      {ch.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             )}
           </div>
           {casesQuery.isLoading ? (
@@ -181,17 +306,22 @@ export function EkartonView({ patientId, patientMbo, alergije, fetchTime }: Ekar
             </div>
           ) : !patientMbo ? (
             <p className="text-sm text-muted-foreground">Nema MBO — dohvat nije moguć</p>
-          ) : activeCases.length === 0 ? (
-            <p className="text-sm text-muted-foreground">Nema aktivnih dijagnoza</p>
+          ) : filteredCases.length === 0 ? (
+            <p className="text-sm text-muted-foreground">
+              {icdFilter && activeCases.length > 0 ? "Nema dijagnoza za odabrano područje" : "Nema aktivnih dijagnoza"}
+            </p>
           ) : (
             <div className="space-y-1.5">
-              {activeCases.map((c) => (
-                <div key={c.case_id} className="flex items-center gap-2">
+              {filteredCases.map((c) => (
+                <div key={c.case_id} className="flex items-center gap-2 flex-wrap">
                   <Badge className={CLINICAL_STATUS_COLORS[c.clinical_status] || "bg-gray-100"}>
                     {CLINICAL_STATUS_LABELS[c.clinical_status] || c.clinical_status}
                   </Badge>
                   <span className="font-mono text-sm">{c.icd_code}</span>
                   <span className="text-sm text-muted-foreground">{c.icd_display}</span>
+                  {c.onset_date && (
+                    <span className="text-xs text-muted-foreground">· od {formatDateHR(c.onset_date)}</span>
+                  )}
                 </div>
               ))}
             </div>
@@ -200,7 +330,100 @@ export function EkartonView({ patientId, patientMbo, alergije, fetchTime }: Ekar
 
         <Separator />
 
-        {/* Tekuća terapija */}
+        {/* 4. Aktivne posjete */}
+        <div className="space-y-2">
+          <div className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
+            <Calendar className="h-4 w-4" />
+            Aktivne posjete
+            {activeVisits.length > 0 && (
+              <Badge variant="outline" className="text-xs ml-1">
+                {activeVisits.length}
+              </Badge>
+            )}
+          </div>
+          {visitsQuery.isLoading ? (
+            <div className="flex justify-center py-2">
+              <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+            </div>
+          ) : !patientMbo ? (
+            <p className="text-sm text-muted-foreground">Nema MBO — dohvat nije moguć</p>
+          ) : activeVisits.length === 0 ? (
+            <p className="text-sm text-muted-foreground">Nema aktivnih posjeta</p>
+          ) : (
+            <div className="space-y-1.5">
+              {activeVisits.map((v) => (
+                <div key={v.visit_id} className="flex items-center gap-2 flex-wrap">
+                  <Badge className={VISIT_STATUS_COLORS[v.status] || "bg-gray-100"}>
+                    {VISIT_STATUS_LABELS[v.status] || v.status}
+                  </Badge>
+                  {v.reason && <span className="text-sm">{v.reason}</span>}
+                  {v.period_start && (
+                    <span className="text-xs text-muted-foreground">
+                      {formatDateTimeHR(v.period_start)}
+                    </span>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        <Separator />
+
+        {/* 5. CEZIH dokumenti */}
+        <div className="space-y-2">
+          <div className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
+            <FileSearch className="h-4 w-4" />
+            CEZIH dokumenti
+            {documents.length > 0 && (
+              <Badge variant="outline" className="text-xs ml-1">
+                {documents.length}
+              </Badge>
+            )}
+          </div>
+          {docsQuery.isLoading ? (
+            <div className="flex justify-center py-2">
+              <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+            </div>
+          ) : !patientMbo ? (
+            <p className="text-sm text-muted-foreground">Nema MBO — dohvat nije moguć</p>
+          ) : documents.length === 0 ? (
+            <p className="text-sm text-muted-foreground">Nema CEZIH dokumenata</p>
+          ) : (
+            <div className="space-y-1.5">
+              {documents.map((d) => (
+                <div key={d.id} className="flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-2 min-w-0 flex-wrap">
+                    <Badge className={DOC_STATUS_COLORS[d.status] || "bg-gray-100"}>
+                      {d.status}
+                    </Badge>
+                    <span className="text-sm truncate">{d.svrha}</span>
+                    {d.izdavatelj && (
+                      <span className="text-xs text-muted-foreground">{d.izdavatelj}</span>
+                    )}
+                    {d.datum_izdavanja && (
+                      <span className="text-xs text-muted-foreground">{formatDateHR(d.datum_izdavanja)}</span>
+                    )}
+                  </div>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-7 w-7 p-0 shrink-0"
+                    onClick={() => handleDownloadPdf(d.id)}
+                    disabled={retrieveDoc.isPending}
+                    title="Preuzmi PDF"
+                  >
+                    <Download className="h-3.5 w-3.5" />
+                  </Button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        <Separator />
+
+        {/* 6. Tekuća terapija */}
         <div className="space-y-2">
           <div className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
             <Pill className="h-4 w-4" />
@@ -231,7 +454,7 @@ export function EkartonView({ patientId, patientMbo, alergije, fetchTime }: Ekar
 
         <Separator />
 
-        {/* Povijest e-Nalaza */}
+        {/* 7. Povijest e-Nalaza */}
         <div className="space-y-2">
           <div className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
             <FileText className="h-4 w-4" />

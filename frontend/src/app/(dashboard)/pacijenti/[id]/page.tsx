@@ -18,10 +18,10 @@ import { DocumentList } from "@/components/documents/document-list"
 import { UploadDialog } from "@/components/documents/upload-dialog"
 import { PatientCezihTab } from "@/components/cezih/patient-cezih-tab"
 import { EkartonView } from "@/components/cezih/ekarton-view"
-import { useInsuranceCheck } from "@/lib/hooks/use-cezih"
 import { SendNalazDialog } from "@/components/cezih/send-nalaz-dialog"
 import { RecordForm } from "@/components/medical-records/record-form"
 import { PrescriptionList } from "@/components/prescriptions/prescription-list"
+import { useQueryClient } from "@tanstack/react-query"
 import { usePatient } from "@/lib/hooks/use-patients"
 import { useExportPatientData } from "@/lib/hooks/use-patient-rights"
 import { usePermissions } from "@/lib/hooks/use-permissions"
@@ -33,30 +33,12 @@ export default function PacijentDetailPage() {
   const id = params.id as string
   const { data: patient, isLoading, error } = usePatient(id)
   const [uploadOpen, setUploadOpen] = useState(false)
-  const [ekartonState, setEkartonState] = useState<"idle" | "loading" | "loaded">("idle")
-  const [ekartonFetchedAt, setEkartonFetchedAt] = useState<string | null>(null)
+  const [ekartonOpen, setEkartonOpen] = useState(false)
   const [sendNalazOpen, setSendNalazOpen] = useState(false)
   const [newRecordOpen, setNewRecordOpen] = useState(false)
   const { canViewMedicalRecords, canViewCezih, canViewDocuments, canUploadDocuments, canEditMedicalRecord, canPerformCezihOps } = usePermissions()
-  const insuranceCheck = useInsuranceCheck()
   const exportMutation = useExportPatientData()
-
-  const handleFetchEkarton = () => {
-    if (ekartonState === "loaded") {
-      setEkartonState("idle")
-      setEkartonFetchedAt(null)
-      return
-    }
-    const now = new Date().toISOString()
-    setEkartonFetchedAt(now)
-    setEkartonState("loading")
-    setTimeout(() => {
-      setEkartonState("loaded")
-      if (patient?.mbo) {
-        insuranceCheck.mutate(patient.mbo)
-      }
-    }, 5000)
-  }
+  const queryClient = useQueryClient()
 
   if (isLoading) {
     return (
@@ -119,21 +101,21 @@ export default function PacijentDetailPage() {
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             <Button
               size="lg"
-              variant={ekartonState === "loaded" ? "default" : "outline"}
+              variant={ekartonOpen ? "default" : "outline"}
               className="h-12 text-base"
-              onClick={handleFetchEkarton}
-              disabled={ekartonState === "loading"}
+              onClick={() => {
+                if (!ekartonOpen) {
+                  // Invalidate all cached eKarton data so everything refetches fresh
+                  queryClient.invalidateQueries({ queryKey: ["cezih", "patient", id] })
+                  queryClient.invalidateQueries({ queryKey: ["cezih", "visits"] })
+                  queryClient.invalidateQueries({ queryKey: ["cezih", "cases"] })
+                  queryClient.invalidateQueries({ queryKey: ["cezih", "documents"] })
+                }
+                setEkartonOpen((prev) => !prev)
+              }}
             >
-              {ekartonState === "loading" ? (
-                <Loader2 className="mr-2 h-5 w-5 animate-spin" />
-              ) : (
-                <FileText className="mr-2 h-5 w-5" />
-              )}
-              {ekartonState === "loading"
-                ? "Dohvaćanje podataka sa CEZIH poslužitelja..."
-                : ekartonState === "loaded"
-                  ? "Sakrij e-Karton"
-                  : "Dohvati e-Karton"}
+              <FileText className="mr-2 h-5 w-5" />
+              {ekartonOpen ? "Sakrij e-Karton" : "Dohvati e-Karton"}
             </Button>
             <Button
               size="lg"
@@ -153,12 +135,11 @@ export default function PacijentDetailPage() {
               Pošalji nalaze (CEZIH)
             </Button>
           </div>
-          {ekartonState === "loaded" && (
+          {ekartonOpen && (
             <EkartonView
               patientId={id}
               patientMbo={patient.mbo}
               alergije={patient.alergije}
-              fetchTime={ekartonFetchedAt}
             />
           )}
         </div>

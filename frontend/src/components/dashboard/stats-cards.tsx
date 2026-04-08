@@ -74,23 +74,25 @@ export function StatsCards() {
         </Link>
       ))}
 
-      <Card>
-        <CardContent className="p-6">
-          <div className="flex items-center justify-between">
-            <p className="text-sm font-medium text-muted-foreground">
-              CEZIH status
-            </p>
-            <div className={`h-2.5 w-2.5 rounded-full ${cezih.dotColor}`} />
-          </div>
-          <p className="text-2xl font-bold mt-2">{cezih.label}</p>
-          {cezih.connectedDoctor && (
-            <p className="text-xs text-muted-foreground mt-1">
-              {cezih.connectedDoctor}
-              {cezih.connectedClinic && <> via {cezih.connectedClinic}</>}
-            </p>
-          )}
-        </CardContent>
-      </Card>
+      <Link href="/cezih?tab=postavke">
+        <Card className="hover:bg-accent/50 transition-colors cursor-pointer">
+          <CardContent className="p-6">
+            <div className="flex items-center justify-between">
+              <p className="text-sm font-medium text-muted-foreground">
+                CEZIH status
+              </p>
+              <div className={`h-2.5 w-2.5 rounded-full ${cezih.dotColor}`} />
+            </div>
+            <p className="text-2xl font-bold mt-2">{cezih.label}</p>
+            {cezih.connectedDoctor && (
+              <p className="text-xs text-muted-foreground mt-1">
+                {cezih.connectedDoctor}
+                {cezih.connectedClinic && <> &mdash; {cezih.connectedClinic}</>}
+              </p>
+            )}
+          </CardContent>
+        </Card>
+      </Link>
     </div>
   )
 }

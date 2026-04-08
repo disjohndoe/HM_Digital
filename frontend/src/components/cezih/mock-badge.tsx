@@ -1,11 +1,25 @@
+"use client"
+
+import { useMemo } from "react"
 import {
   Tooltip,
   TooltipContent,
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip"
+import { useCezihStatus } from "@/lib/hooks/use-cezih"
 
+/**
+ * Shows a "DEMO" badge when CEZIH is running in mock mode.
+ * Uses the already-cached useCezihStatus query — React Query deduplicates
+ * by queryKey, so this doesn't create duplicate polling.
+ */
 export function MockBadge() {
+  const { data } = useCezihStatus()
+  const isDemo = data?.mock === true
+
+  if (!isDemo) return null
+
   return (
     <TooltipProvider>
       <Tooltip>

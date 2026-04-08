@@ -1,8 +1,8 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
+import { useSearchParams } from "next/navigation"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { PageHeader } from "@/components/shared/page-header"
@@ -11,32 +11,66 @@ import { InsuranceCheck } from "@/components/cezih/insurance-check"
 import { CezihActivityLog } from "@/components/cezih/activity-log"
 import { ForeignerRegistration } from "@/components/cezih/foreigner-registration"
 import { RegistryTools } from "@/components/cezih/registry-tools"
+import { toast } from "sonner"
 import { usePermissions } from "@/lib/hooks/use-permissions"
-import { useCezihStatus as useSettingsCezihStatus, useGenerateAgentSecret } from "@/lib/hooks/use-settings"
+import { useSettingsCezihStatus, useGenerateAgentSecret, useCreatePairingToken } from "@/lib/hooks/use-settings"
+
+const VALID_TABS = ["stranci", "registri", "aktivnost", "postavke"]
 
 export default function CezihPage() {
+  const searchParams = useSearchParams()
+  const tabParam = searchParams.get("tab")
+  const defaultTab = tabParam && VALID_TABS.includes(tabParam) ? tabParam : "aktivnost"
   const { canViewCezih } = usePermissions()
   const { data: settingsStatus } = useSettingsCezihStatus()
   const generateSecret = useGenerateAgentSecret()
+  const createPairingToken = useCreatePairingToken()
   const [generatedSecret, setGeneratedSecret] = useState<string | null>(null)
-  const [copied, setCopied] = useState(false)
+  const [generatedTenantId, setGeneratedTenantId] = useState<string | null>(null)
+  const [copied, setCopied] = useState<string | null>(null)
+  const [pairingFallback, setPairingFallback] = useState(false)
+
+  useEffect(() => {
+    if (settingsStatus?.agent_connected) {
+      setGeneratedSecret(null)
+      setGeneratedTenantId(null)
+      setPairingFallback(false)
+    }
+  }, [settingsStatus?.agent_connected])
 
   const handleGenerate = async () => {
     try {
       const res = await generateSecret.mutateAsync()
       setGeneratedSecret(res.agent_secret)
-      setCopied(false)
-      await navigator.clipboard.writeText(res.agent_secret)
-      setCopied(true)
+      setGeneratedTenantId(res.tenant_id)
     } catch {
       // mutation error handled by react-query
     }
   }
 
-  const handleCopy = async () => {
-    if (generatedSecret) {
-      await navigator.clipboard.writeText(generatedSecret)
-      setCopied(true)
+  const handleCopy = async (text: string, key: string) => {
+    try {
+      await navigator.clipboard.writeText(text)
+      setCopied(key)
+      setTimeout(() => setCopied(null), 2000)
+    } catch {
+      toast.error("Kopiranje nije uspjelo. Pokušajte ručno označiti tekst.")
+    }
+  }
+
+  const handlePairAgent = async () => {
+    setPairingFallback(false)
+    try {
+      if (!generatedSecret) {
+        const res = await generateSecret.mutateAsync()
+        setGeneratedSecret(res.agent_secret)
+        setGeneratedTenantId(res.tenant_id)
+      }
+      const pairRes = await createPairingToken.mutateAsync()
+      window.location.href = pairRes.pairing_url
+      setTimeout(() => setPairingFallback(true), 3000)
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Greška pri povezivanju agenta")
     }
   }
 
@@ -60,7 +94,7 @@ export default function CezihPage() {
         <InsuranceCheck />
       </div>
 
-      <Tabs defaultValue="aktivnost" className="space-y-4">
+      <Tabs defaultValue={defaultTab} className="space-y-4">
         <TabsList className="grid w-full grid-cols-4">
           <TabsTrigger value="stranci">Stranci</TabsTrigger>
           <TabsTrigger value="registri">Registri</TabsTrigger>
@@ -102,12 +136,6 @@ export default function CezihPage() {
                   </div>
                 </div>
 
-                <div className="flex items-center gap-2">
-                  <span className="text-sm text-muted-foreground">Status:</span>
-                  <Badge variant="secondary">
-                    {settingsStatus?.status || "Nepovezano"}
-                  </Badge>
-                </div>
               </CardContent>
             </Card>
 
@@ -142,34 +170,70 @@ export default function CezihPage() {
                       size="sm"
                       variant="outline"
                       onClick={handleGenerate}
-                      disabled={generateSecret.isPending}
+                      disabled={generateSecret.isPending || settingsStatus?.agent_connected}
                     >
-                      {generateSecret.isPending ? "Generiranje..." : "Generiraj tajni ključ"}
+                      {generateSecret.isPending
+                        ? "Generiranje..."
+                        : settingsStatus?.agent_connected
+                          ? "Agent je već povezan"
+                          : "Generiraj pristupne podatke"}
                     </Button>
-                    {generatedSecret && (
-                      <Button size="sm" variant="ghost" onClick={handleCopy}>
-                        {copied ? "Kopirano!" : "Kopiraj"}
+                    {generatedSecret && !settingsStatus?.agent_connected && (
+                      <Button
+                        size="sm"
+                        onClick={handlePairAgent}
+                        disabled={createPairingToken.isPending}
+                      >
+                        {createPairingToken.isPending ? "Povezivanje..." : "Poveži agenta"}
                       </Button>
                     )}
                   </div>
 
-                  {generatedSecret && (
-                    <div className="rounded-md bg-muted p-3">
-                      <p className="mb-1 text-xs font-medium text-muted-foreground">Tajni ključ agenta:</p>
-                      <code className="block break-all text-xs">{generatedSecret}</code>
+                  {pairingFallback && (
+                    <p className="text-xs text-amber-600">
+                      Agent se nije pokrenuo? Provjerite je li <strong>HM Digital Agent</strong> instaliran na ovom računalu.
+                    </p>
+                  )}
+
+                  {generatedSecret && generatedTenantId && (
+                    <div className="rounded-md bg-muted p-3 space-y-2">
+                      <div>
+                        <div className="flex items-center justify-between mb-1">
+                          <p className="text-xs font-medium text-muted-foreground">Tenant ID</p>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-5 text-xs px-1"
+                            onClick={() => handleCopy(generatedTenantId, "tenant")}
+                          >
+                            {copied === "tenant" ? "Kopirano!" : "Kopiraj"}
+                          </Button>
+                        </div>
+                        <code className="block break-all text-xs">{generatedTenantId}</code>
+                      </div>
+                      <div>
+                        <div className="flex items-center justify-between mb-1">
+                          <p className="text-xs font-medium text-muted-foreground">Tajni ključ</p>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-5 text-xs px-1"
+                            onClick={() => handleCopy(generatedSecret, "secret")}
+                          >
+                            {copied === "secret" ? "Kopirano!" : "Kopiraj"}
+                          </Button>
+                        </div>
+                        <code className="block break-all text-xs">{generatedSecret}</code>
+                      </div>
                     </div>
                   )}
 
                   <div className="rounded-md border p-3">
                     <p className="mb-2 text-sm font-medium">Upute za postavljanje</p>
                     <ol className="list-inside list-decimal space-y-1 text-sm text-muted-foreground">
-                      <li>Generirajte tajni ključ gore</li>
-                      <li>Preuzmite i instalirajte HM Digital Agent aplikaciju</li>
-                      <li>Postavite okružne varijable:
-                        <code className="ml-1 rounded bg-muted px-1 text-xs">HM_TENANT_ID</code> i
-                        <code className="ml-1 rounded bg-muted px-1 text-xs">HM_AGENT_SECRET</code>
-                      </li>
-                      <li>Pokrenite agent — status povezanosti prikazat će se ovdje</li>
+                      <li>Kliknite <strong>"Generiraj pristupne podatke"</strong> — dobit ćete Tenant ID i tajni ključ</li>
+                      <li>Instalirajte <strong>HM Digital Agent</strong> na računalo u ordinaciji</li>
+                      <li>Kliknite <strong>"Poveži agenta"</strong> — agent će se automatski konfigurirati</li>
                     </ol>
                   </div>
                 </div>
