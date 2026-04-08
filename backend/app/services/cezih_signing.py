@@ -401,52 +401,19 @@ async def sign_document(
 
         logger.info("Agent signing successful (kid=%.16s, sig_len=%d)", kid, len(sig_b64))
 
-        # Agent returns CMS/PKCS#7 detached signature (base64-encoded DER).
-        # CEZIH expects JWS format in Bundle.signature.data.
-        # Extract the raw cryptographic signature from the CMS structure
-        # and wrap it in a JWS compact serialization.
-        cms_der = base64.b64decode(sig_b64)
-        raw_sig = _extract_signature_from_cms(cms_der)
+        # Agent returns CMS/PKCS#7 detached signature (already base64-encoded).
+        # Send directly as FHIR signature.data — CMS is a valid signature format.
+        signature_data = sig_b64
 
-        if raw_sig is None:
-            logger.warning("Could not extract raw sig from CMS, using CMS directly")
-            raw_sig = cms_der
-
-        # Detect algorithm from signature size:
-        # ECDSA DER = ~70-140 bytes, RSA-2048 = 256 bytes
-        if len(raw_sig) <= 160:
-            # JWS requires raw r||s, not DER-encoded ECDSA
-            raw_sig = _ecdsa_der_to_raw(raw_sig)
-            # Detect curve from raw r||s size
-            if len(raw_sig) <= 64:
-                alg = "ES256"   # P-256: r=32 + s=32
-            elif len(raw_sig) <= 96:
-                alg = "ES384"   # P-384: r=48 + s=48
-            else:
-                alg = "ES512"   # P-521: r=66 + s=66
-        else:
-            alg = "RS256"
-
-        # Create JWS: header.payload.signature (base64url, no padding)
-        jws_header = json.dumps({"kid": kid, "alg": alg}, separators=(",", ":"))
-        header_b64url = base64.urlsafe_b64encode(jws_header.encode()).decode().rstrip("=")
-        payload_b64url = base64.urlsafe_b64encode(document_bytes).decode().rstrip("=")
-        sig_b64url = base64.urlsafe_b64encode(raw_sig).decode().rstrip("=")
-
-        jws_compact = f"{header_b64url}.{payload_b64url}.{sig_b64url}"
-
-        # FHIR signature.data is base64Binary — encode the JWS string
-        signature_data = base64.b64encode(jws_compact.encode("ascii")).decode("ascii")
-
-        logger.info("JWS created (alg=%s, kid=%.16s, jws_len=%d)", alg, kid, len(jws_compact))
+        logger.info("Using CMS/PKCS#7 signature directly (kid=%.16s, len=%d)", kid, len(sig_b64))
 
         return {
             "success": True,
             "signature": signature_data,
-            "signing_algorithm": alg,
+            "signing_algorithm": "CMS/PKCS7",
             "signed_at": datetime.now(UTC).isoformat(),
             "document_id": document_id,
-            "raw_response": {"kid": kid, "alg": alg, "raw_sig_len": len(raw_sig)},
+            "raw_response": {"kid": kid, "sig_length": len(sig_b64)},
         }
 
     # No agent — refuse to sign

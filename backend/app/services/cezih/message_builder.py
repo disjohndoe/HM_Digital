@@ -174,7 +174,7 @@ async def add_signature(
         ],
         "when": _now_iso(),
         "who": practitioner_ref(practitioner_id),
-        "sigFormat": "application/jose",
+        "sigFormat": "application/pkcs7-signature",
         "targetFormat": "application/fhir+json",
         "data": signature_data,
     }
