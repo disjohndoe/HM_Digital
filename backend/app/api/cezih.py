@@ -699,7 +699,7 @@ async def create_visit(
         data.patient_mbo, data.nacin_prijema, data.vrsta_posjete, data.tip_posjete, data.reason,
         db=db, user_id=current_user.id, tenant_id=current_user.tenant_id,
         http_client=_http_client(request),
-        practitioner_id=str(current_user.id),
+        practitioner_id=current_user.practitioner_id or "",
         org_code=org_code, source_oid=source_oid,
     )
 
@@ -719,7 +719,7 @@ async def update_visit(
         visit_id, mbo, data.reason,
         db=db, user_id=current_user.id, tenant_id=current_user.tenant_id,
         http_client=_http_client(request),
-        practitioner_id=str(current_user.id),
+        practitioner_id=current_user.practitioner_id or "",
         org_code=org_code, source_oid=source_oid,
     )
 
@@ -739,6 +739,6 @@ async def visit_action(
         visit_id, data.action, mbo,
         db=db, user_id=current_user.id, tenant_id=current_user.tenant_id,
         http_client=_http_client(request),
-        practitioner_id=str(current_user.id),
+        practitioner_id=current_user.practitioner_id or "",
         org_code=org_code, source_oid=source_oid,
     )
