@@ -184,10 +184,12 @@ fn do_cezih_request(
     // URL
     session.url(url).map_err(|e| e.to_string())?;
 
-    // Headers — skip Authorization (smart card cert handles auth)
+    // Headers — skip Authorization only for port 8443 (mTLS handles auth there).
+    // Port 9443 (reference services) needs the Bearer token.
+    let is_mtls_port = url.contains(":8443");
     let mut list = List::new();
     for (k, v) in headers {
-        if k.eq_ignore_ascii_case("authorization") {
+        if k.eq_ignore_ascii_case("authorization") && is_mtls_port {
             continue;
         }
         list.append(&format!("{}: {}", k, v)).map_err(|e| e.to_string())?;
@@ -244,7 +246,7 @@ fn do_cezih_request(
 
         let mut list = List::new();
         for (k, v) in headers {
-            if k.eq_ignore_ascii_case("authorization") { continue; }
+            if k.eq_ignore_ascii_case("authorization") && is_mtls_port { continue; }
             list.append(&format!("{}: {}", k, v)).map_err(|e| e.to_string())?;
         }
         list.append("Expect:").map_err(|e| e.to_string())?;
