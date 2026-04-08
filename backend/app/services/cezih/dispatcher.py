@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.constants import CEZIH_ELIGIBLE_TYPES
-from app.services import cezih_mock_service
+from app.services import cezih_service
 from app.services.cezih import service as real_service
 from app.services.cezih.exceptions import CezihError, CezihSigningError
 
@@ -64,6 +64,24 @@ def _require_audit_params(
 # http_client is always passed but only used in real mode.
 
 
+async def _persist_insurance_to_patient(
+    db: AsyncSession, tenant_id: UUID, mbo: str, status_osiguranja: str,
+) -> UUID | None:
+    """Update patient's cached insurance status. Returns patient ID for audit."""
+    from app.models.patient import Patient
+
+    result = await db.execute(
+        select(Patient).where(Patient.tenant_id == tenant_id, Patient.mbo == mbo)
+    )
+    patient = result.scalar_one_or_none()
+    if patient:
+        patient.cezih_insurance_status = status_osiguranja
+        patient.cezih_insurance_checked_at = datetime.now(UTC)
+        await db.flush()
+        return patient.id
+    return None
+
+
 async def insurance_check(
     mbo: str,
     *,
@@ -73,7 +91,7 @@ async def insurance_check(
     http_client=None,
 ) -> dict:
     if _is_mock():
-        return await cezih_mock_service.mock_insurance_check(mbo, db=db, user_id=user_id, tenant_id=tenant_id)
+        return await cezih_service.mock_insurance_check(mbo, db=db, user_id=user_id, tenant_id=tenant_id)
 
     _require_audit_params(db, user_id, tenant_id)
 
@@ -85,9 +103,16 @@ async def insurance_check(
 
     result["mock"] = False
 
+    patient_id = None
+    if db and tenant_id:
+        patient_id = await _persist_insurance_to_patient(
+            db, tenant_id, mbo, result.get("status_osiguranja", ""),
+        )
+
     await _write_audit(
         db, tenant_id, user_id,
         action="insurance_check",
+        resource_id=patient_id,
         details={"mbo": mbo, "result": result.get("status_osiguranja"), "mode": "real"},
     )
 
@@ -104,7 +129,7 @@ async def send_enalaz(
     http_client=None,
 ) -> dict:
     if _is_mock():
-        return await cezih_mock_service.mock_send_enalaz(
+        return await cezih_service.mock_send_enalaz(
             db, tenant_id, patient_id, record_id,
             user_id=user_id,
         )
@@ -192,7 +217,7 @@ async def send_erecept(
     http_client=None,
 ) -> dict:
     if _is_mock():
-        return await cezih_mock_service.mock_send_erecept(
+        return await cezih_service.mock_send_erecept(
             patient_id, lijekovi, db=db, user_id=user_id, tenant_id=tenant_id,
         )
 
@@ -256,7 +281,7 @@ async def cancel_erecept(
     http_client=None,
 ) -> dict:
     if _is_mock():
-        return await cezih_mock_service.mock_cancel_erecept(
+        return await cezih_service.mock_cancel_erecept(
             recept_id, db=db, user_id=user_id, tenant_id=tenant_id,
         )
     _require_audit_params(db, user_id, tenant_id)
@@ -275,7 +300,7 @@ async def cancel_erecept(
 
 async def cezih_status(tenant_id=None, *, http_client=None) -> dict:
     if _is_mock():
-        mock_result = cezih_mock_service.mock_cezih_status(tenant_id)
+        mock_result = cezih_service.mock_cezih_status(tenant_id)
         mock_result["mode"] = settings.CEZIH_MODE
         return mock_result
 
@@ -310,7 +335,7 @@ async def cezih_status(tenant_id=None, *, http_client=None) -> dict:
 async def drug_search(query: str) -> list[dict]:
     """Drug search — uses local HZZO drug DB."""
     if _is_mock():
-        return cezih_mock_service.mock_drug_search(query)
+        return cezih_service.mock_drug_search(query)
 
     from app.services.halmed_sync_service import search_drugs_db
 
@@ -358,7 +383,7 @@ async def sign_document(
     http_client=None,
 ) -> dict:
     if _is_mock():
-        return cezih_mock_service.mock_sign_document(document_id=document_id)
+        return cezih_service.mock_sign_document(document_id=document_id)
 
     if not http_client:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="HTTP client not available")
@@ -379,7 +404,7 @@ async def sign_document(
 
 async def signing_health_check(*, http_client=None) -> dict:
     if _is_mock():
-        return cezih_mock_service.mock_sign_health_check()
+        return cezih_service.mock_sign_health_check()
 
     if not http_client:
         return {"reachable": False, "reason": "HTTP client not available"}
@@ -407,7 +432,7 @@ async def oid_lookup(
     http_client=None,
 ) -> dict:
     if _is_mock():
-        return await cezih_mock_service.mock_lookup_oid(oid, db=db, user_id=user_id, tenant_id=tenant_id)
+        return await cezih_service.mock_lookup_oid(oid, db=db, user_id=user_id, tenant_id=tenant_id)
     _require_audit_params(db, user_id, tenant_id)
     try:
         result = await real_service.lookup_oid(http_client, oid)
@@ -434,7 +459,7 @@ async def code_system_query(
     http_client=None,
 ) -> list[dict]:
     if _is_mock():
-        return await cezih_mock_service.mock_query_code_system(
+        return await cezih_service.mock_query_code_system(
             system_name, query, count, db=db, user_id=user_id, tenant_id=tenant_id,
         )
     _require_audit_params(db, user_id, tenant_id)
@@ -464,7 +489,7 @@ async def value_set_expand(
     http_client=None,
 ) -> dict:
     if _is_mock():
-        return await cezih_mock_service.mock_expand_value_set(
+        return await cezih_service.mock_expand_value_set(
             url, filter_text, db=db, user_id=user_id, tenant_id=tenant_id,
         )
     _require_audit_params(db, user_id, tenant_id)
@@ -491,7 +516,7 @@ async def organization_search(
     http_client=None,
 ) -> list[dict]:
     if _is_mock():
-        return await cezih_mock_service.mock_find_organizations(name, db=db, user_id=user_id, tenant_id=tenant_id)
+        return await cezih_service.mock_find_organizations(name, db=db, user_id=user_id, tenant_id=tenant_id)
     _require_audit_params(db, user_id, tenant_id)
     try:
         result = await real_service.find_organizations(http_client, name)
@@ -510,7 +535,7 @@ async def practitioner_search(
     http_client=None,
 ) -> list[dict]:
     if _is_mock():
-        return await cezih_mock_service.mock_find_practitioners(name, db=db, user_id=user_id, tenant_id=tenant_id)
+        return await cezih_service.mock_find_practitioners(name, db=db, user_id=user_id, tenant_id=tenant_id)
     _require_audit_params(db, user_id, tenant_id)
     try:
         result = await real_service.find_practitioners(http_client, name)
@@ -534,7 +559,7 @@ async def foreigner_registration(
     http_client=None,
 ) -> dict:
     if _is_mock():
-        return await cezih_mock_service.mock_register_foreigner(
+        return await cezih_service.mock_register_foreigner(
             patient_data, db=db, user_id=user_id, tenant_id=tenant_id,
         )
     _require_audit_params(db, user_id, tenant_id)
@@ -565,7 +590,7 @@ async def dispatch_retrieve_cases(
     http_client=None,
 ) -> list[dict]:
     if _is_mock():
-        return await cezih_mock_service.mock_retrieve_cases(patient_mbo, db=db, user_id=user_id, tenant_id=tenant_id)
+        return await cezih_service.mock_retrieve_cases(patient_mbo, db=db, user_id=user_id, tenant_id=tenant_id)
     _require_audit_params(db, user_id, tenant_id)
     try:
         result = await real_service.retrieve_cases(http_client, patient_mbo)
@@ -592,7 +617,7 @@ async def dispatch_create_case(
     source_oid: str | None = None,
 ) -> dict:
     if _is_mock():
-        return await cezih_mock_service.mock_create_case(
+        return await cezih_service.mock_create_case(
             patient_mbo, icd_code, icd_display, onset_date, verification_status, note_text,
             db=db, user_id=user_id, tenant_id=tenant_id,
         )
@@ -627,7 +652,7 @@ async def dispatch_update_case(
     source_oid: str | None = None,
 ) -> dict:
     if _is_mock():
-        return await cezih_mock_service.mock_update_case(case_id, action, db=db, user_id=user_id, tenant_id=tenant_id)
+        return await cezih_service.mock_update_case(case_id, action, db=db, user_id=user_id, tenant_id=tenant_id)
     _require_audit_params(db, user_id, tenant_id)
     try:
         result = await real_service.update_case(
@@ -668,7 +693,7 @@ async def dispatch_update_case_data(
             "verification_status": verification_status, "icd_code": icd_code,
             "onset_date": onset_date, "abatement_date": abatement_date, "note_text": note_text,
         }.items() if v is not None}
-        return await cezih_mock_service.mock_update_case_data(
+        return await cezih_service.mock_update_case_data(
             case_id, updates, db=db, user_id=user_id, tenant_id=tenant_id,
         )
     _require_audit_params(db, user_id, tenant_id)
@@ -710,7 +735,7 @@ async def dispatch_search_documents(
     http_client=None,
 ) -> list[dict]:
     if _is_mock():
-        return await cezih_mock_service.mock_search_documents(
+        return await cezih_service.mock_search_documents(
             patient_mbo, document_type, date_from, date_to, status_filter,
             db=db, user_id=user_id, tenant_id=tenant_id,
         )
@@ -741,7 +766,7 @@ async def dispatch_replace_document(
     http_client=None,
 ) -> dict:
     if _is_mock():
-        return await cezih_mock_service.mock_replace_document(
+        return await cezih_service.mock_replace_document(
             original_reference_id, db=db, user_id=user_id, tenant_id=tenant_id,
         )
     _require_audit_params(db, user_id, tenant_id)
@@ -787,7 +812,7 @@ async def dispatch_cancel_document(
     http_client=None,
 ) -> dict:
     if _is_mock():
-        return await cezih_mock_service.mock_cancel_document(
+        return await cezih_service.mock_cancel_document(
             reference_id, db=db, user_id=user_id, tenant_id=tenant_id,
         )
     _require_audit_params(db, user_id, tenant_id)
@@ -813,7 +838,7 @@ async def dispatch_retrieve_document(
     http_client=None,
 ) -> bytes:
     if _is_mock():
-        return await cezih_mock_service.mock_retrieve_document(
+        return await cezih_service.mock_retrieve_document(
             reference_id, db=db, user_id=user_id, tenant_id=tenant_id,
         )
     _require_audit_params(db, user_id, tenant_id)
@@ -849,7 +874,7 @@ async def dispatch_create_visit(
     source_oid: str | None = None,
 ) -> dict:
     if _is_mock():
-        return await cezih_mock_service.mock_create_visit(
+        return await cezih_service.mock_create_visit(
             patient_mbo, nacin_prijema, reason, db=db, user_id=user_id, tenant_id=tenant_id,
         )
     _require_audit_params(db, user_id, tenant_id)
@@ -900,7 +925,7 @@ async def dispatch_update_visit(
     source_oid: str | None = None,
 ) -> dict:
     if _is_mock():
-        return await cezih_mock_service.mock_update_visit(
+        return await cezih_service.mock_update_visit(
             visit_id, reason, patient_mbo=patient_mbo,
             db=db, user_id=user_id, tenant_id=tenant_id,
         )
@@ -955,7 +980,7 @@ async def dispatch_visit_action(
     source_oid: str | None = None,
 ) -> dict:
     if _is_mock():
-        return await cezih_mock_service.mock_visit_action(
+        return await cezih_service.mock_visit_action(
             visit_id, action, patient_mbo=patient_mbo,
             db=db, user_id=user_id, tenant_id=tenant_id,
         )
@@ -1023,7 +1048,7 @@ async def dispatch_list_visits(
     http_client=None,
 ) -> list[dict]:
     if _is_mock():
-        return await cezih_mock_service.mock_list_visits(
+        return await cezih_service.mock_list_visits(
             patient_mbo, db=db, user_id=user_id, tenant_id=tenant_id,
         )
     _require_audit_params(db, user_id, tenant_id)

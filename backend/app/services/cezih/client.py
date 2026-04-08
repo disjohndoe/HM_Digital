@@ -130,6 +130,7 @@ class CezihFhirClient:
         try:
             body = _json.loads(body_text) if body_text else {}
         except Exception:
+            logger.error("Failed to parse agent proxy response as JSON. Raw body (first 500 chars): %s", body_text[:500])
             body = {}
 
         if status_code >= 400:
@@ -225,8 +226,8 @@ class CezihFhirClient:
 
         return body
 
-    async def get(self, path: str, *, params: dict | None = None) -> dict:
-        return await self.request("GET", path, params=params)
+    async def get(self, path: str, *, params: dict | None = None, timeout: int | None = None) -> dict:
+        return await self.request("GET", path, params=params, timeout=timeout)
 
     async def post(self, path: str, *, json_body: dict | None = None) -> dict:
         return await self.request("POST", path, json_body=json_body)
@@ -237,9 +238,9 @@ class CezihFhirClient:
         return await self.post(path, json_body=bundle)
 
     async def health_check(self) -> bool:
-        """Simple connectivity check."""
+        """Quick connectivity check with short timeout."""
         try:
-            await self.get("terminology-services/api/v1/CodeSystem", params={"_count": "1"})
+            await self.request("GET", "terminology-services/api/v1/CodeSystem", params={"_count": "1"}, timeout=5)
             return True
         except CezihError:
             return False

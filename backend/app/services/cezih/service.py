@@ -42,7 +42,7 @@ async def check_insurance(client: httpx.AsyncClient, mbo: str) -> dict:
     fhir_client = CezihFhirClient(client)
     params = {"identifier": f"{SYS_MBO}|{mbo}"}
 
-    response = await fhir_client.get("patient-registry-services/api/v1/Patient", params=params)
+    response = await fhir_client.get("patient-registry-services/api/v1/Patient", params=params, timeout=10)
 
     if response.get("resourceType") == "Bundle":
         entries = response.get("entry", [])
@@ -77,8 +77,9 @@ async def check_insurance(client: httpx.AsyncClient, mbo: str) -> dict:
             "broj_osiguranja": broj,
         }
 
-    # Unexpected response format
-    logger.warning("CEZIH insurance check: unexpected response type: %s", response.get("resourceType"))
+    # Unexpected response format — log full response for debugging
+    logger.warning("CEZIH insurance check: unexpected response type: %s — full response: %.500s",
+                    response.get("resourceType"), str(response))
     raise CezihError("Unexpected CEZIH response format for patient lookup")
 
 
