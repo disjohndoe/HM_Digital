@@ -52,9 +52,10 @@ async def mock_insurance_check(
         "ime": name[0],
         "prezime": name[1],
         "datum_rodjenja": name[2],
+        "oib": "12345678901",
+        "spol": "M",
         "osiguravatelj": "HZZO",
         "status_osiguranja": "Aktivan",
-        "broj_osiguranja": f"HR-{mbo[-6:]}",
     }
 
     patient_id = None

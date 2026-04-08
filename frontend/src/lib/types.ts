@@ -478,9 +478,10 @@ export interface InsuranceCheckResponse {
   ime: string;
   prezime: string;
   datum_rodjenja: string;
+  oib: string;
+  spol: string;
   osiguravatelj: string;
   status_osiguranja: string;
-  broj_osiguranja: string;
 }
 
 export interface ENalazResponse {

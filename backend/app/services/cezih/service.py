@@ -52,26 +52,34 @@ async def check_insurance(client: httpx.AsyncClient, mbo: str) -> dict:
                 "ime": "",
                 "prezime": "",
                 "datum_rodjenja": "",
+                "oib": "",
+                "spol": "",
                 "osiguravatelj": "",
                 "status_osiguranja": "Nije pronađen",
-                "broj_osiguranja": "",
             }
 
         patient = FHIRPatient.model_validate(entries[0].get("resource", {}))
         family, given = _extract_name(patient)
 
-        # MBO is the insurance number (Matični Broj Osiguranika)
-        osiguravatelj = "HZZO"  # Default for CEZIH-found patients
-        broj = mbo
+        # Extract OIB from identifiers
+        oib = ""
+        for ident in patient.identifier:
+            if ident.system and ident.system.endswith("/OIB") and ident.value:
+                oib = ident.value
+
+        # Map FHIR gender to Croatian
+        spol_map = {"male": "M", "female": "Ž", "other": "Ostalo", "unknown": "Nepoznato"}
+        spol = spol_map.get(patient.gender or "", "")
 
         return {
             "mbo": mbo,
             "ime": given,
             "prezime": family,
             "datum_rodjenja": patient.birthDate or "",
-            "osiguravatelj": osiguravatelj,
+            "oib": oib,
+            "spol": spol,
+            "osiguravatelj": "HZZO",
             "status_osiguranja": "Aktivan",
-            "broj_osiguranja": broj,
         }
 
     # Unexpected response format — log full response for debugging

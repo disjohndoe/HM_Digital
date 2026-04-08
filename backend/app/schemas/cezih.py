@@ -14,9 +14,10 @@ class InsuranceCheckResponse(BaseModel):
     ime: str
     prezime: str
     datum_rodjenja: str
+    oib: str
+    spol: str
     osiguravatelj: str
     status_osiguranja: str
-    broj_osiguranja: str
 
 
 class ENalazRequest(BaseModel):

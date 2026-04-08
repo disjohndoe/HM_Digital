@@ -73,16 +73,20 @@ export function InsuranceCheck() {
                   <span className="font-mono">{result.mbo}</span>
                 </div>
                 <div>
+                  <span className="text-muted-foreground">OIB:</span>{" "}
+                  <span className="font-mono">{result.oib}</span>
+                </div>
+                <div>
                   <span className="text-muted-foreground">Datum rođenja:</span>{" "}
                   {formatDateHR(result.datum_rodjenja)}
                 </div>
                 <div>
-                  <span className="text-muted-foreground">Osiguravatelj:</span>{" "}
-                  {result.osiguravatelj}
+                  <span className="text-muted-foreground">Spol:</span>{" "}
+                  {result.spol}
                 </div>
                 <div>
-                  <span className="text-muted-foreground">Broj osiguranja:</span>{" "}
-                  <span className="font-mono">{result.broj_osiguranja}</span>
+                  <span className="text-muted-foreground">Osiguravatelj:</span>{" "}
+                  {result.osiguravatelj}
                 </div>
               </div>
             </div>
