@@ -31,7 +31,7 @@ reqwest = { version = "0.12", features = ["json", "cookies"] }
 dirs = "5"
 url = "2"
 keyring = "3"
-windows-sys = { version = "0.59", features = ["Win32_Security_Cryptography"] }
+windows-sys = { version = "0.59", features = ["Win32_Security_Cryptography", "Win32_Foundation"] }
 curl = { version = "0.4", features = ["ssl", "static-curl"] }
 sha2 = "0.10"
 base64 = "0.22"

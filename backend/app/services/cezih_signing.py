@@ -297,19 +297,9 @@ async def sign_document(
 
         logger.info("Agent signing successful (kid=%.16s, sig_len=%d)", kid, len(sig_b64))
 
-        # Create JWS: header.payload.signature (base64url-encoded parts)
-        jws_header_json = json.dumps({"kid": kid, "alg": "RS256"}, separators=(",", ":"))
-        header_b64url = base64.urlsafe_b64encode(jws_header_json.encode()).decode().rstrip("=")
-        payload_b64url = base64.urlsafe_b64encode(document_bytes).decode().rstrip("=")
-
-        # Decode agent's standard base64 signature, re-encode as base64url
-        raw_sig = base64.b64decode(sig_b64)
-        sig_b64url = base64.urlsafe_b64encode(raw_sig).decode().rstrip("=")
-
-        jws_compact = f"{header_b64url}.{payload_b64url}.{sig_b64url}"
-
-        # FHIR base64Binary: base64-encode the entire JWS string
-        signature_data = base64.b64encode(jws_compact.encode("ascii")).decode("ascii")
+        # Agent returns CMS/PKCS#7 detached signature (already base64-encoded).
+        # FHIR signature.data is base64Binary — use the signature directly.
+        signature_data = sig_b64
 
         return {
             "success": True,

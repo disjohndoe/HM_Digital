@@ -1,25 +1,19 @@
-//! Smart card digital signing via Windows CryptoAPI.
+//! Smart card digital signing via Windows CryptSignMessage.
 //!
-//! Uses the AKD signing certificate (OU=Signing) from the Windows
-//! certificate store. The private key lives on the smart card and
-//! Windows CSP handles PIN caching (same process = single prompt).
+//! Uses the high-level CryptSignMessage API which handles all CSP, hash
+//! algorithm, and key access details internally. This works reliably with
+//! smart cards whose CSPs don't support direct CryptCreateHash(SHA-256)
+//! or NCryptSignHash.
 //!
-//! Flow:
-//! 1. Open "My" cert store
-//! 2. Find cert with OU=Signing (AKD signing certificate)
-//! 3. Acquire private key handle via CryptAcquireCertificatePrivateKey
-//! 4. Hash data with SHA-256
-//! 5. Sign hash with RSA PKCS#1 v1.5
-//! 6. Return raw signature bytes + certificate thumbprint as kid
+//! Output is a detached PKCS#7/CMS signature (DER-encoded).
 
 use log::{debug, info, warn};
-use sha2::{Digest, Sha256};
 use std::ptr;
 use windows_sys::Win32::Security::Cryptography::*;
 
 /// Result of a successful signing operation.
 pub struct SignResult {
-    /// Raw RSA signature bytes (DER, big-endian).
+    /// Detached CMS/PKCS#7 signature (DER-encoded).
     pub signature: Vec<u8>,
     /// Certificate thumbprint (SHA-1 hex) — used as JWS `kid`.
     pub kid: String,
@@ -27,8 +21,8 @@ pub struct SignResult {
 
 /// Sign data using the AKD smart card signing certificate.
 ///
-/// Returns the raw RSA signature and the certificate's thumbprint.
-/// The caller is responsible for creating the JWS structure.
+/// Uses CryptSignMessage which handles CSP, hashing, and signing internally.
+/// Returns a detached PKCS#7/CMS signature.
 pub fn sign_with_smartcard(data: &[u8]) -> Result<SignResult, String> {
     unsafe { sign_with_smartcard_inner(data) }
 }
@@ -43,7 +37,7 @@ unsafe fn sign_with_smartcard_inner(data: &[u8]) -> Result<SignResult, String> {
         return Err("Failed to open certificate store".into());
     }
 
-    // 2. Find the signing certificate (OU=Signing)
+    // 2. Find the signing certificate
     let cert_ctx = find_signing_cert(store, ENCODING);
     if cert_ctx.is_null() {
         CertCloseStore(store, 0);
@@ -52,63 +46,96 @@ unsafe fn sign_with_smartcard_inner(data: &[u8]) -> Result<SignResult, String> {
         );
     }
 
-    // 3. Get certificate thumbprint for JWS kid
+    // 3. Get certificate thumbprint for kid
     let kid = get_cert_thumbprint(cert_ctx)?;
-    info!("Found signing cert, thumbprint (kid): {}", &kid[..16]);
+    info!("Found signing cert, thumbprint (kid): {}", &kid[..kid.len().min(16)]);
 
-    // 4. Acquire private key
-    let mut key_prov: usize = 0; // HCRYPTPROV or NCRYPT_KEY_HANDLE
-    let mut key_spec: u32 = 0;
-    let mut caller_free: i32 = 0;
+    // 4. Sign using CryptSignMessage — handles CSP, hash, key internally
+    // SHA-256 OID: 2.16.840.1.101.3.4.2.1
+    let hash_oid = b"2.16.840.1.101.3.4.2.1\0";
 
-    let ok = CryptAcquireCertificatePrivateKey(
-        cert_ctx,
-        CRYPT_ACQUIRE_CACHE_FLAG | CRYPT_ACQUIRE_SILENT_FLAG,
+    let sign_params = CRYPT_SIGN_MESSAGE_PARA {
+        cbSize: std::mem::size_of::<CRYPT_SIGN_MESSAGE_PARA>() as u32,
+        dwMsgEncodingType: ENCODING,
+        pSigningCert: cert_ctx,
+        HashAlgorithm: CRYPT_ALGORITHM_IDENTIFIER {
+            pszObjId: hash_oid.as_ptr() as *mut u8,
+            Parameters: CRYPT_INTEGER_BLOB {
+                cbData: 0,
+                pbData: ptr::null_mut(),
+            },
+        },
+        pvHashAuxInfo: ptr::null_mut(),
+        cMsgCert: 0,          // Don't include cert in output
+        rgpMsgCert: ptr::null_mut(),
+        cMsgCrl: 0,
+        rgpMsgCrl: ptr::null_mut(),
+        cAuthAttr: 0,
+        rgAuthAttr: ptr::null_mut(),
+        cUnauthAttr: 0,
+        rgUnauthAttr: ptr::null_mut(),
+        dwFlags: 0,
+        dwInnerContentType: 0,
+    };
+
+    // Data to sign
+    let data_ptr: *const u8 = data.as_ptr();
+    let data_len: u32 = data.len() as u32;
+
+    // Get signature size first
+    let mut sig_size: u32 = 0;
+    let ok = CryptSignMessage(
+        &sign_params,
+        1, // fDetachedSignature = TRUE (detached)
+        1, // cToBeSigned = 1 data blob
+        &data_ptr,
+        &data_len,
         ptr::null_mut(),
-        &mut key_prov,
-        &mut key_spec,
-        &mut caller_free,
+        &mut sig_size,
     );
 
     if ok == 0 {
-        // Retry without SILENT flag — may trigger PIN prompt
-        let ok2 = CryptAcquireCertificatePrivateKey(
-            cert_ctx,
-            CRYPT_ACQUIRE_CACHE_FLAG,
-            ptr::null_mut(),
-            &mut key_prov,
-            &mut key_spec,
-            &mut caller_free,
-        );
-        if ok2 == 0 {
-            CertFreeCertificateContext(cert_ctx);
-            CertCloseStore(store, 0);
-            return Err("Failed to acquire private key from smart card".into());
-        }
+        let err = windows_sys::Win32::Foundation::GetLastError();
+        CertFreeCertificateContext(cert_ctx);
+        CertCloseStore(store, 0);
+        return Err(format!(
+            "CryptSignMessage size query failed (err=0x{:08x})",
+            err
+        ));
     }
 
-    info!(
-        "Private key acquired (key_spec={}, caller_free={})",
-        key_spec, caller_free
+    info!("CryptSignMessage: signature will be {} bytes", sig_size);
+
+    // Allocate and sign
+    let mut sig_buf = vec![0u8; sig_size as usize];
+    let ok = CryptSignMessage(
+        &sign_params,
+        1,
+        1,
+        &data_ptr,
+        &data_len,
+        sig_buf.as_mut_ptr(),
+        &mut sig_size,
     );
 
-    // 5. Compute SHA-256 hash
-    let hash_bytes = Sha256::digest(data);
-    debug!("SHA-256 hash: {:x}", hash_bytes);
-
-    // 6. Sign the hash using CryptoAPI
-    let signature = sign_hash_capi(key_prov, key_spec, &hash_bytes)?;
-
-    // 7. Cleanup
-    if caller_free != 0 {
-        CryptReleaseContext(key_prov, 0);
-    }
     CertFreeCertificateContext(cert_ctx);
     CertCloseStore(store, 0);
 
-    info!("Signing successful, signature size: {} bytes", signature.len());
+    if ok == 0 {
+        let err = windows_sys::Win32::Foundation::GetLastError();
+        return Err(format!(
+            "CryptSignMessage failed (err=0x{:08x}). PIN cancelled or card error?",
+            err
+        ));
+    }
 
-    Ok(SignResult { signature, kid })
+    sig_buf.truncate(sig_size as usize);
+    info!("Signing successful, CMS signature size: {} bytes", sig_buf.len());
+
+    Ok(SignResult {
+        signature: sig_buf,
+        kid,
+    })
 }
 
 /// Find a certificate with OU=Signing in the store.
@@ -132,9 +159,6 @@ unsafe fn find_signing_cert(store: *mut core::ffi::c_void, encoding: u32) -> *co
             let subject = subject.trim_end_matches('\0');
             debug!("Checking cert: {}", subject);
 
-            // AKD smart cards have two certs:
-            // - OU=Identification (for mTLS auth)
-            // - OU=Signing (for document signing)
             if subject.contains("OU=Signing") || subject.contains("OU=Digital Signature") {
                 info!("Found signing certificate: {}", subject);
                 return ctx;
@@ -143,7 +167,7 @@ unsafe fn find_signing_cert(store: *mut core::ffi::c_void, encoding: u32) -> *co
         prev_ctx = ctx;
     }
 
-    // Fallback: try any cert with a private key (non-Identification)
+    // Fallback: any non-Identification cert
     warn!("No OU=Signing cert found, trying fallback...");
     prev_ctx = ptr::null();
     loop {
@@ -161,7 +185,6 @@ unsafe fn find_signing_cert(store: *mut core::ffi::c_void, encoding: u32) -> *co
             let subject = String::from_utf16_lossy(&buf);
             let subject = subject.trim_end_matches('\0');
 
-            // Skip identification certs, take any other (likely signing)
             if !subject.contains("OU=Identification") {
                 info!("Fallback signing certificate: {}", subject);
                 return ctx;
@@ -175,7 +198,7 @@ unsafe fn find_signing_cert(store: *mut core::ffi::c_void, encoding: u32) -> *co
 
 /// Get SHA-1 thumbprint of a certificate (hex string).
 unsafe fn get_cert_thumbprint(ctx: *const CERT_CONTEXT) -> Result<String, String> {
-    let mut hash_size: u32 = 20; // SHA-1 = 20 bytes
+    let mut hash_size: u32 = 20;
     let mut hash_buf = [0u8; 20];
 
     let ok = CryptHashCertificate(
@@ -196,53 +219,4 @@ unsafe fn get_cert_thumbprint(ctx: *const CERT_CONTEXT) -> Result<String, String
         .iter()
         .map(|b| format!("{:02x}", b))
         .collect())
-}
-
-/// Sign a SHA-256 hash using legacy CryptoAPI (CAPI).
-unsafe fn sign_hash_capi(
-    prov: usize,
-    key_spec: u32,
-    hash_bytes: &[u8],
-) -> Result<Vec<u8>, String> {
-    // Create a hash object
-    let mut hash_handle: usize = 0;
-    if CryptCreateHash(prov, CALG_SHA_256, 0, 0, &mut hash_handle) == 0 {
-        return Err("CryptCreateHash failed".into());
-    }
-
-    // Set the hash value directly (we already computed SHA-256)
-    if CryptSetHashParam(hash_handle, HP_HASHVAL, hash_bytes.as_ptr(), 0) == 0 {
-        CryptDestroyHash(hash_handle);
-        return Err("CryptSetHashParam failed".into());
-    }
-
-    // Get signature size first
-    let mut sig_len: u32 = 0;
-    if CryptSignHashW(hash_handle, key_spec, ptr::null(), 0, ptr::null_mut(), &mut sig_len) == 0 {
-        CryptDestroyHash(hash_handle);
-        return Err("CryptSignHash (size query) failed".into());
-    }
-
-    // Sign
-    let mut sig_buf = vec![0u8; sig_len as usize];
-    if CryptSignHashW(
-        hash_handle,
-        key_spec,
-        ptr::null(),
-        0,
-        sig_buf.as_mut_ptr(),
-        &mut sig_len,
-    ) == 0
-    {
-        CryptDestroyHash(hash_handle);
-        return Err("CryptSignHash failed — PIN cancelled or card error?".into());
-    }
-
-    CryptDestroyHash(hash_handle);
-
-    // CryptoAPI returns signature in little-endian; PKCS#1 / JWS needs big-endian
-    sig_buf.truncate(sig_len as usize);
-    sig_buf.reverse();
-
-    Ok(sig_buf)
 }

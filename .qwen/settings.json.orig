@@ -1,0 +1,8 @@
+{
+  "fastModel": "",
+  "ui": {
+    "accessibility": {
+      "enableLoadingPhrases": true
+    }
+  }
+}
