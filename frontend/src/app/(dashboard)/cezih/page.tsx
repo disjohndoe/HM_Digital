@@ -116,6 +116,7 @@ export default function CezihPage() {
         },
         onError: () => {
           bindingInFlight.current = false
+          setSuppressAutoBind(true)
         },
       })
     }
