@@ -296,19 +296,13 @@ async def sign_document(
         "Accept": "application/json",
     }
 
-    try:
-        token = await _get_signing_token(client)
-        headers["Authorization"] = f"Bearer {token}"
-    except CezihSigningError:
-        raise
-    except Exception as exc:
-        logger.warning("CEZIH signing: could not obtain OAuth token — %s", exc)
-
     start = time.perf_counter()
     logger.info("CEZIH signing request: POST %s (hash=%.16s...)", url, doc_hash)
 
     try:
         # Route through agent if connected (server has no VPN)
+        # Port 8443: agent handles mTLS auth via smart card — no Bearer token needed
+        # Port 9443: would need Bearer token but returned 403 (insufficient roles)
         if _should_use_agent():
             body = await _request_via_agent(
                 method="POST",
