@@ -352,18 +352,17 @@ async def sign_bundle_for_cezih(
 ) -> dict:
     """Sign a FHIR Bundle for CEZIH using the agent's smart card.
 
-    CEZIH signature format (verified from real CEZIH examples):
-      signature.data = base64( JOSE_header_JSON + Bundle_JSON + raw_signature_bytes )
+    Uses standard JWS compact serialization (RFC 7515):
+      signature.data = base64url(header).base64url(payload).base64url(signature)
 
     Where:
-      - JOSE header: {"kid":"<thumbprint>","alg":"<ES384|RS256>"}
-      - Bundle JSON: compact JSON of the Bundle with signature.data = ""
-      - Raw signature: NCryptSignHash output (ECDSA r||s or RSA PKCS1)
+      - header: {"kid":"<thumbprint>","alg":"<ES384|RS256>"}
+      - payload: compact JSON of the Bundle with signature.data = ""
+      - signature: NCryptSignHash output (ECDSA r||s or RSA PKCS1)
 
-    Signing input uses standard JWS (RFC 7515):
-      base64url(header) + "." + base64url(bundle)
-    Storage uses CEZIH format:
-      base64( raw_header_json + raw_bundle_json + raw_sig )
+    Signing input (RFC 7515):
+      base64url(header) + "." + base64url(payload)
+    The sigFormat field in Bundle.signature is set to "application/jose".
     """
     if not _should_use_agent():
         raise CezihSigningError("Neispravna CEZIH konekcija — agent nije spojen")

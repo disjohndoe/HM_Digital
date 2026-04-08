@@ -233,7 +233,7 @@ fn do_cezih_request(
 
     // Diagnostic logging for POST failures (helps debug CEZIH $process-message issues)
     if method.eq_ignore_ascii_case("POST") && (status >= 400 || resp.starts_with('<') || resp.is_empty()) {
-        warn!("POST {} — status {} — body (first 500): {}", url, status, &resp[..resp.len().min(500)]);
+        warn!("POST {} — status {} — body (first 2000): {}", url, status, &resp[..resp.len().min(2000)]);
     }
 
     // Retry when the request hit Keycloak auth instead of the FHIR service.
@@ -321,7 +321,7 @@ async fn handle_http_proxy(msg: serde_json::Value, session: CezihSession) -> Str
         do_cezih_request(&mut s, &method, &url, &hdrs, body_bytes.as_deref())
     }).await {
         Ok(Ok((status, body))) => {
-            info!("HTTP proxy {} — {} ({} bytes) body: {}", rid, status, body.len(), &body[..body.len().min(500)]);
+            info!("HTTP proxy {} — {} ({} bytes) body: {}", rid, status, body.len(), &body[..body.len().min(2000)]);
             json!({
                 "type": "http_proxy_response",
                 "request_id": request_id,

@@ -2,8 +2,9 @@
 //!
 //! Two signing modes:
 //! 1. **JWS mode** (`sign_for_jws`): Uses NCryptSignHash to produce raw ECDSA/RSA
-//!    signature bytes for the CEZIH signature format:
-//!    `base64(JOSE_header_JSON + Bundle_JSON + raw_signature_bytes)`
+//!    signature bytes in standard JWS compact serialization (RFC 7515):
+//!    `base64url(header).base64url(payload).base64url(signature)`
+//!    The Bundle.signature.sigFormat field must be set to "application/jose".
 //!
 //! 2. **CMS mode** (`sign_with_smartcard`): Legacy CryptSignMessage that produces
 //!    detached PKCS#7/CMS signatures. Used as fallback if NCrypt is unavailable.
@@ -23,11 +24,11 @@ pub struct SignResult {
     pub kid: String,
 }
 
-/// Result of JWS signing — contains the complete base64-encoded signature
+/// Result of JWS signing — contains the complete JWS compact serialization
 /// ready to be placed directly in Bundle.signature.data.
 pub struct JwsSignResult {
-    /// CEZIH signature format: base64(JOSE_header_JSON + Bundle_JSON + raw_sig_bytes).
-    /// Uses standard base64 (not base64url). No dots.
+    /// JWS compact serialization: base64url(header).base64url(payload).base64url(signature).
+    /// sigFormat must be set to "application/jose" in the Bundle signature object.
     pub jws_base64: String,
     /// Certificate thumbprint (SHA-1 hex).
     pub kid: String,
@@ -35,16 +36,15 @@ pub struct JwsSignResult {
     pub algorithm: String,
 }
 
-/// Sign a FHIR Bundle for CEZIH — produces CEZIH signature format.
+/// Sign a FHIR Bundle for CEZIH — produces standard JWS compact serialization.
 ///
 /// Takes the serialized Bundle JSON bytes (with signature.data = "").
-/// CEZIH format: base64( JOSE_header_JSON + Bundle_JSON + raw_signature_bytes )
+/// JWS format: base64url(header).base64url(payload).base64url(signature)
 ///
-/// Signing input uses standard JWS (RFC 7515):
+/// Signing input (RFC 7515):
 ///   base64url(header) + "." + base64url(payload)
-/// Storage format is CEZIH-specific:
-///   base64( raw_header_json + raw_bundle_json + raw_sig )
-/// Returns the base64 string ready for FHIR signature.data.
+/// Returns the JWS compact string ready for FHIR signature.data.
+/// sigFormat must be "application/jose" in the Bundle.signature object.
 pub fn sign_for_jws(bundle_json: &[u8]) -> Result<JwsSignResult, String> {
     unsafe { sign_for_jws_inner(bundle_json) }
 }
@@ -52,7 +52,6 @@ pub fn sign_for_jws(bundle_json: &[u8]) -> Result<JwsSignResult, String> {
 unsafe fn sign_for_jws_inner(bundle_json: &[u8]) -> Result<JwsSignResult, String> {
     const ENCODING: u32 = X509_ASN_ENCODING | PKCS_7_ASN_ENCODING;
     let b64url = base64::engine::general_purpose::URL_SAFE_NO_PAD;
-    let b64std = base64::engine::general_purpose::STANDARD;
 
     let store_name: Vec<u16> = "My\0".encode_utf16().collect();
     let store = CertOpenSystemStoreW(0, store_name.as_ptr());
@@ -180,20 +179,15 @@ unsafe fn sign_for_jws_inner(bundle_json: &[u8]) -> Result<JwsSignResult, String
 
         sig_buf.truncate(actual_len as usize);
 
-        // CEZIH storage format: base64( raw_header_json + raw_bundle_json + raw_sig )
-        // Concatenate raw bytes first, then ONE standard base64 encoding.
-        // Verified from real CEZIH example in docs/CEZIH/Posjete/.
-        let mut raw_concat: Vec<u8> = Vec::with_capacity(
-            jose_header.len() + bundle_json.len() + sig_buf.len()
-        );
-        raw_concat.extend_from_slice(jose_header.as_bytes());
-        raw_concat.extend_from_slice(bundle_json);
-        raw_concat.extend_from_slice(&sig_buf);
-        let jws_base64 = b64std.encode(&raw_concat);
+        // Standard JWS compact serialization (RFC 7515): header.payload.signature
+        // Each part is base64url-encoded (no padding), separated by dots.
+        // The sigFormat field in the Bundle.signature tells HAPI to accept dots in base64Binary.
+        let sig_b64url = b64url.encode(&sig_buf);
+        let jws_base64 = format!("{}.{}.{}", header_b64url, payload_b64url, sig_b64url);
 
-        info!("JWS: complete! alg={}, header={} + bundle={} + sig={} bytes = {} raw, base64={} chars",
+        info!("JWS: complete! alg={}, header={} + bundle={} + sig={} bytes, jws={} chars",
               algorithm, jose_header.len(), bundle_json.len(), sig_buf.len(),
-              raw_concat.len(), jws_base64.len());
+              jws_base64.len());
 
         // Cleanup
         for (ctx, _) in &certs {
