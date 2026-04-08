@@ -128,7 +128,7 @@ class CezihFhirClient:
         status_code = result.get("status_code", 0)
         logger.info("CEZIH response via agent: %s %s -> %d (%.1fms)", method, url, status_code, duration_ms)
         if status_code >= 400:
-            logger.warning("CEZIH agent proxy error body: %s", result.get("body", "")[:1000])
+            logger.warning("CEZIH agent proxy error body: %s", result.get("body", "")[:3000])
 
         body_text = result.get("body", "")
         try:
@@ -146,7 +146,7 @@ class CezihFhirClient:
                     operation_outcome=body,
                 )
             raise CezihFhirError(
-                f"CEZIH HTTP {status_code}: {body_text[:500]}",
+                f"CEZIH HTTP {status_code}: {body_text[:2000]}",
                 status_code=status_code,
             )
 
