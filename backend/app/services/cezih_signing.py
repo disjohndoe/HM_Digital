@@ -285,11 +285,10 @@ async def sign_document(
     else:
         url = f"{signing_url.rstrip('/')}/services-router/gateway/extsigner/api/sign"
 
-    # CEZIH extsigner (rdss-service) — probe multiple field names
-    # Previous attempts: "hash" (rejected), "content" (rejected), "dataToSign" (rejected)
-    # Try: "data" field with base64 hash
+    # CEZIH extsigner (rdss-service) — probe: try "digest" field
+    # Rejected so far: "hash", "content", "dataToSign", "data"
     payload = {
-        "data": doc_hash,
+        "digest": doc_hash,
     }
 
     headers = {
