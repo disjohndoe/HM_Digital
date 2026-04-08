@@ -236,12 +236,17 @@ fn do_cezih_request(
         warn!("POST {} — status {} — body (first 500): {}", url, status, &resp[..resp.len().min(500)]);
     }
 
-    // 406 = Accept header lost during Keycloak redirect chain on first request.
-    // Also retry on HTML response for POST (Keycloak login page instead of FHIR JSON).
-    // Session cookie is now established — retry goes direct (no redirect, headers preserved).
+    // Retry when the request hit Keycloak auth instead of the FHIR service.
+    // This happens on first request before mTLS session cookie is established.
+    // After this failed attempt, the session cookie IS set — retry goes direct.
+    // Conditions: 406 (Accept lost), 415 (body sent to auth page), HTML response,
+    // empty POST, or response body mentions Keycloak auth path.
+    let resp_has_auth_path = resp.contains("/auth/realms/") || resp.contains("openid-connect");
     let should_retry = status == 406
+        || status == 415
         || (resp.starts_with('<') && !resp.is_empty())
-        || (method.eq_ignore_ascii_case("POST") && resp.is_empty() && status < 400);
+        || (method.eq_ignore_ascii_case("POST") && resp.is_empty() && status < 400)
+        || resp_has_auth_path;
     if should_retry {
         info!("Got {} (redirect/session issue) — retrying with session cookie", status);
         session.reset();
