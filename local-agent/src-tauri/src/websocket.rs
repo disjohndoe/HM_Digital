@@ -5,10 +5,12 @@ use futures_util::{SinkExt, StreamExt};
 use log::{error, info, warn};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use tokio::sync::{mpsc, RwLock};
+use std::sync::Mutex as StdMutex;
+use curl::easy::{Easy2, Handler, WriteError, List, SslOpt};
+use tokio::sync::{mpsc, watch, RwLock};
 use tokio_tungstenite::tungstenite::Message;
 
-use crate::smartcard::check_card_status;
+use crate::smartcard::{check_card_status, readers_to_json};
 use crate::vpn::check_vpn_status;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -21,6 +23,10 @@ pub struct ConnectionState {
     pub reader_available: bool,
     pub last_error: Option<String>,
     pub agent_id: Option<String>,
+    pub readers: Vec<serde_json::Value>,
+    pub configured: bool,
+    pub backend_url: Option<String>,
+    pub pairing_status: Option<String>,
 }
 
 impl Default for ConnectionState {
@@ -34,130 +40,294 @@ impl Default for ConnectionState {
             reader_available: false,
             last_error: None,
             agent_id: None,
+            readers: vec![],
+            configured: false,
+            backend_url: None,
+            pairing_status: None,
         }
     }
 }
 
 pub type SharedState = Arc<RwLock<ConnectionState>>;
 
-/// Read smart card and VPN stubs, build status message.
-fn build_status_message() -> serde_json::Value {
+/// Channel to signal the WebSocket reconnection loop to stop.
+/// Send `true` to cancel; the loop checks each iteration.
+pub type CancelTx = watch::Sender<bool>;
+
+/// Snapshot of card + VPN status, collected on a blocking thread.
+struct StatusSnapshot {
+    reader_available: bool,
+    card_inserted: bool,
+    card_holder: Option<String>,
+    vpn_connected: bool,
+    vpn_name: Option<String>,
+    readers_json: Vec<serde_json::Value>,
+    ws_message: serde_json::Value,
+}
+
+/// Collect card + VPN status (blocking I/O — call via spawn_blocking).
+fn collect_status() -> StatusSnapshot {
     let card = check_card_status();
     let vpn = check_vpn_status();
-    json!({
+    let readers_json = readers_to_json(&card.readers);
+    let ws_message = json!({
         "type": "status",
         "card_inserted": card.card_inserted,
         "card_holder": card.card_holder,
         "reader_available": card.reader_available,
         "vpn_connected": vpn.connected,
         "vpn_name": vpn.connection_name,
-    })
+        "readers": &readers_json,
+    });
+    StatusSnapshot {
+        reader_available: card.reader_available,
+        card_inserted: card.card_inserted,
+        card_holder: card.card_holder,
+        vpn_connected: vpn.connected,
+        vpn_name: vpn.connection_name,
+        readers_json,
+        ws_message,
+    }
 }
 
-/// Cookie file name prefix for persistent sessions across CEZIH calls.
-/// Each agent instance gets its own cookie jar keyed by agent_id.
-const COOKIE_FILE_PREFIX: &str = "cezih_session_";
+/// Apply a status snapshot to shared state.
+async fn apply_status(state: &SharedState, snap: &StatusSnapshot) {
+    let mut s = state.write().await;
+    s.reader_available = snap.reader_available;
+    s.card_inserted = snap.card_inserted;
+    s.card_holder = snap.card_holder.clone();
+    s.vpn_connected = snap.vpn_connected;
+    s.vpn_name = snap.vpn_name.clone();
+    s.readers = snap.readers_json.clone();
+}
 
-/// Handle an HTTP proxy request via curl.exe subprocess.
-/// Uses --ssl-auto-client-cert for SChannel smart card mTLS.
-/// Cookie jar persists the Keycloak session across requests.
-async fn handle_http_proxy(msg: serde_json::Value, agent_id: &str) -> String {
-    let request_id = msg.get("request_id").and_then(|v| v.as_str()).unwrap_or("");
-    let method = msg.get("method").and_then(|v| v.as_str()).unwrap_or("GET");
-    let url = msg.get("url").and_then(|v| v.as_str()).unwrap_or("");
-    let headers = msg.get("headers").and_then(|v| v.as_object());
-    let body = msg.get("body");
+// ---------------------------------------------------------------------------
+// In-process libcurl session for CEZIH mTLS (smart card via SChannel)
+// ---------------------------------------------------------------------------
+// Why libcurl instead of curl.exe subprocess:
+//   1. certws2:8443 requires client cert at TLS level on EVERY request (no cert → 406)
+//   2. Windows Smart Card CSP caches PIN per-process — each curl.exe = new PIN prompt
+//   3. libcurl runs in the agent process → PIN cached for process lifetime → one prompt
+// ---------------------------------------------------------------------------
 
-    // Each agent gets its own cookie jar to prevent session conflicts in multi-agent setups
-    let cookie_file = format!("{}{}.txt", COOKIE_FILE_PREFIX, &agent_id[..agent_id.len().min(8)]);
-    let cookie_path = std::env::temp_dir().join(cookie_file);
-    let cookie_str = cookie_path.to_string_lossy().to_string();
+/// Collects the HTTP response body from libcurl.
+struct CezihCollector {
+    response_body: Vec<u8>,
+}
 
-    let mut cmd = tokio::process::Command::new("curl.exe");
-    cmd.arg("-s")                      // Silent
-       .arg("-L")                      // Follow redirects
-       .arg("--ssl-auto-client-cert")  // SChannel auto-select smart card cert
-       .arg("-b").arg(&cookie_str)     // Read cookies
-       .arg("-c").arg(&cookie_str)     // Write cookies
-       .arg("--max-time").arg("30")
-       .arg("-w").arg("\n%{http_code}") // Append status code
-       .arg("-X").arg(method);
+impl Handler for CezihCollector {
+    fn write(&mut self, data: &[u8]) -> Result<usize, WriteError> {
+        self.response_body.extend_from_slice(data);
+        Ok(data.len())
+    }
+}
 
-    // Set headers — skip Authorization (let smart card cert auth handle it)
-    if let Some(hdrs) = headers {
-        for (key, val) in hdrs {
-            if key.eq_ignore_ascii_case("authorization") {
-                continue;
-            }
-            if let Some(v) = val.as_str() {
-                cmd.arg("-H").arg(format!("{}: {}", key, v));
+/// Shared libcurl session — created once per WS connection.
+/// PIN is prompted on first TLS handshake, cached for process lifetime.
+/// StdMutex (not tokio) because libcurl is synchronous (used in spawn_blocking).
+type CezihSession = Arc<StdMutex<Easy2<CezihCollector>>>;
+
+/// Create a new libcurl session configured for CEZIH mTLS.
+fn create_cezih_session() -> Easy2<CezihCollector> {
+    let mut easy = Easy2::new(CezihCollector { response_body: vec![] });
+
+    // SChannel auto client cert selection (= curl --ssl-auto-client-cert)
+    let mut ssl_opts = SslOpt::new();
+    ssl_opts.auto_client_cert(true);
+    easy.ssl_options(&ssl_opts).expect("failed to set SSL options");
+
+    // Follow redirects (Keycloak auth: certws2 → certsso2 → certws2)
+    easy.follow_location(true).expect("failed to set follow_location");
+
+    // Enable in-memory cookie engine (no file needed)
+    easy.cookie_list("").expect("failed to enable cookie engine");
+
+    // Request timeout
+    easy.timeout(Duration::from_secs(30)).expect("failed to set timeout");
+
+    easy
+}
+
+/// Apply persistent session options after reset().
+/// reset() preserves cookies/connections but clears all options.
+fn apply_session_defaults(easy: &mut Easy2<CezihCollector>) -> Result<(), String> {
+    let mut ssl_opts = SslOpt::new();
+    ssl_opts.auto_client_cert(true);
+    easy.ssl_options(&ssl_opts).map_err(|e| e.to_string())?;
+    easy.follow_location(true).map_err(|e| e.to_string())?;
+    easy.cookie_list("").map_err(|e| e.to_string())?;
+    easy.timeout(Duration::from_secs(30)).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/// Execute a single CEZIH HTTP request via libcurl. Synchronous — call from spawn_blocking.
+fn do_cezih_request(
+    session: &mut Easy2<CezihCollector>,
+    method: &str,
+    url: &str,
+    headers: &[(String, String)],
+    body: Option<&[u8]>,
+) -> Result<(u32, String), String> {
+    // Reset per-request state, preserve cookies + connections
+    session.reset();
+    session.get_mut().response_body.clear();
+    apply_session_defaults(session)?;
+
+    // URL
+    session.url(url).map_err(|e| e.to_string())?;
+
+    // Headers — skip Authorization (smart card cert handles auth)
+    let mut list = List::new();
+    for (k, v) in headers {
+        if k.eq_ignore_ascii_case("authorization") {
+            continue;
+        }
+        list.append(&format!("{}: {}", k, v)).map_err(|e| e.to_string())?;
+    }
+    // Disable Expect: 100-continue (libcurl default on POST, CEZIH may not support)
+    list.append("Expect:").map_err(|e| e.to_string())?;
+    session.http_headers(list).map_err(|e| e.to_string())?;
+
+    // Method + body
+    match method.to_uppercase().as_str() {
+        "GET" => {
+            session.get(true).map_err(|e| e.to_string())?;
+        }
+        "POST" => {
+            session.post(true).map_err(|e| e.to_string())?;
+            session.post_fields_copy(body.unwrap_or(b"")).map_err(|e| e.to_string())?;
+        }
+        "DELETE" => {
+            session.custom_request("DELETE").map_err(|e| e.to_string())?;
+        }
+        other => {
+            // PUT, PATCH, etc.
+            session.custom_request(other).map_err(|e| e.to_string())?;
+            if let Some(b) = body {
+                session.post(true).map_err(|e| e.to_string())?;
+                session.post_fields_copy(b).map_err(|e| e.to_string())?;
             }
         }
     }
 
-    // Set body if present
-    if let Some(b) = body {
-        if !b.is_null() {
-            let body_str = if b.is_string() { b.as_str().unwrap_or("").to_string() } else { b.to_string() };
-            cmd.arg("-d").arg(body_str);
+    // Execute (blocking — PIN prompted on first TLS handshake, cached after)
+    session.perform().map_err(|e| format!("curl: {}", e))?;
+
+    let status = session.response_code().map_err(|e| e.to_string())?;
+    let resp = String::from_utf8_lossy(&session.get_ref().response_body).to_string();
+
+    // 406 = Accept header lost during Keycloak redirect chain on first request.
+    // Session cookie is now established — retry goes direct (no redirect, headers preserved).
+    if status == 406 {
+        info!("Got 406 (redirect stripped headers) — retrying with session cookie");
+        session.reset();
+        session.get_mut().response_body.clear();
+        apply_session_defaults(session)?;
+        session.url(url).map_err(|e| e.to_string())?;
+
+        let mut list = List::new();
+        for (k, v) in headers {
+            if k.eq_ignore_ascii_case("authorization") { continue; }
+            list.append(&format!("{}: {}", k, v)).map_err(|e| e.to_string())?;
         }
-    }
+        list.append("Expect:").map_err(|e| e.to_string())?;
+        session.http_headers(list).map_err(|e| e.to_string())?;
 
-    cmd.arg(url);
-
-    // Execute curl
-    match cmd.output().await {
-        Ok(output) => {
-            let raw = String::from_utf8_lossy(&output.stdout).to_string();
-            let stderr = String::from_utf8_lossy(&output.stderr).to_string();
-
-            if !output.status.success() && raw.is_empty() {
-                error!("curl failed for {} — exit={}, stderr={}", &request_id[..request_id.len().min(8)], output.status, stderr);
-                return json!({
-                    "type": "http_proxy_response",
-                    "request_id": request_id,
-                    "error": format!("curl failed: {}", stderr.trim())
-                }).to_string();
+        match method.to_uppercase().as_str() {
+            "GET" => { session.get(true).map_err(|e| e.to_string())?; }
+            "POST" => {
+                session.post(true).map_err(|e| e.to_string())?;
+                session.post_fields_copy(body.unwrap_or(b"")).map_err(|e| e.to_string())?;
             }
-
-            // Parse status code from last line (appended by -w)
-            let (resp_body, status_code) = match raw.rfind('\n') {
-                Some(pos) => {
-                    let code_str = raw[pos+1..].trim();
-                    let code = code_str.parse::<u16>().unwrap_or(0);
-                    (raw[..pos].to_string(), code)
+            "DELETE" => { session.custom_request("DELETE").map_err(|e| e.to_string())?; }
+            other => {
+                session.custom_request(other).map_err(|e| e.to_string())?;
+                if let Some(b) = body {
+                    session.post(true).map_err(|e| e.to_string())?;
+                    session.post_fields_copy(b).map_err(|e| e.to_string())?;
                 }
-                None => (raw, 0),
-            };
+            }
+        }
 
-            info!("HTTP proxy response {} — {} ({} bytes)", &request_id[..request_id.len().min(8)], status_code, resp_body.len());
+        session.perform().map_err(|e| format!("curl retry: {}", e))?;
+        let status = session.response_code().map_err(|e| e.to_string())?;
+        let resp = String::from_utf8_lossy(&session.get_ref().response_body).to_string();
+        return Ok((status, resp));
+    }
+
+    Ok((status, resp))
+}
+
+/// Handle an HTTP proxy request using in-process libcurl with SChannel mTLS.
+/// PIN is prompted once (first TLS handshake), then cached for process lifetime.
+async fn handle_http_proxy(msg: serde_json::Value, session: CezihSession) -> String {
+    let request_id = msg.get("request_id").and_then(|v| v.as_str()).unwrap_or("").to_string();
+    let method = msg.get("method").and_then(|v| v.as_str()).unwrap_or("GET").to_string();
+    let url = msg.get("url").and_then(|v| v.as_str()).unwrap_or("").to_string();
+    let headers_val = msg.get("headers").cloned();
+    let body_val = msg.get("body").cloned();
+
+    let rid = request_id[..request_id.len().min(8)].to_string();
+
+    // Parse headers
+    let hdrs: Vec<(String, String)> = headers_val
+        .as_ref()
+        .and_then(|h| h.as_object())
+        .map(|obj| obj.iter().filter_map(|(k, v)| v.as_str().map(|s| (k.clone(), s.to_string()))).collect())
+        .unwrap_or_default();
+
+    // Serialize body
+    let body_bytes: Option<Vec<u8>> = body_val.as_ref().and_then(|b| {
+        if b.is_null() { None }
+        else if b.is_string() { Some(b.as_str().unwrap_or("").as_bytes().to_vec()) }
+        else { Some(b.to_string().into_bytes()) }
+    });
+
+    // Execute on blocking thread (libcurl is synchronous, StdMutex serializes access)
+    match tokio::task::spawn_blocking(move || {
+        let mut s = session.lock().map_err(|e| format!("Session lock poisoned: {}", e))?;
+        do_cezih_request(&mut s, &method, &url, &hdrs, body_bytes.as_deref())
+    }).await {
+        Ok(Ok((status, body))) => {
+            info!("HTTP proxy {} — {} ({} bytes)", rid, status, body.len());
             json!({
                 "type": "http_proxy_response",
                 "request_id": request_id,
-                "status_code": status_code,
+                "status_code": status,
                 "headers": {},
-                "body": resp_body
+                "body": body
+            }).to_string()
+        }
+        Ok(Err(e)) => {
+            error!("HTTP proxy {} failed: {}", rid, e);
+            json!({
+                "type": "http_proxy_response",
+                "request_id": request_id,
+                "error": e
             }).to_string()
         }
         Err(e) => {
-            error!("Failed to spawn curl for {} — {}", &request_id[..request_id.len().min(8)], e);
+            error!("HTTP proxy {} task panicked: {}", rid, e);
             json!({
                 "type": "http_proxy_response",
                 "request_id": request_id,
-                "error": format!("Failed to run curl: {}", e)
+                "error": format!("Internal error: {}", e)
             }).to_string()
         }
     }
 }
 
 /// Spawn a WebSocket connection task that reconnects with exponential backoff.
+/// Returns a `CancelTx` that, when sent `true`, stops the reconnection loop.
 pub fn spawn_connection_task(
     backend_url: String,
     tenant_id: String,
     agent_secret: String,
     initial_agent_id: Option<String>,
     state: SharedState,
-) {
+) -> CancelTx {
+    let (cancel_tx, mut cancel_rx) = watch::channel(false);
+
     tauri::async_runtime::spawn(async move {
         let mut backoff = Duration::from_secs(1);
         let max_backoff = Duration::from_secs(60);
@@ -166,12 +336,21 @@ pub fn spawn_connection_task(
         let mut agent_id: Option<String> = initial_agent_id;
 
         loop {
+            // Check cancellation before each connection attempt
+            if *cancel_rx.borrow() {
+                info!("WebSocket task cancelled — stopping reconnection loop");
+                break;
+            }
+
             // Connect WITHOUT credentials in URL — auth is sent as first message
             let ws_url = format!("{}ws/agent", backend_url);
             info!("Connecting to {}", ws_url);
 
-            match tokio_tungstenite::connect_async(&ws_url).await {
-                Ok((ws_stream, _)) => {
+            match tokio::time::timeout(
+                Duration::from_secs(15),
+                tokio_tungstenite::connect_async(&ws_url),
+            ).await {
+                Ok(Ok((ws_stream, _))) => {
                     info!("WebSocket TCP connected (awaiting auth confirmation)");
 
                     let (mut write, mut read) = ws_stream.split();
@@ -191,12 +370,15 @@ pub fn spawn_connection_task(
                     // Channel for spawned tasks to send WS messages (e.g., HTTP proxy responses)
                     let (outbound_tx, mut outbound_rx) = mpsc::channel::<String>(32);
 
+                    // Shared libcurl session — PIN cached for process lifetime.
+                    let cezih_session: CezihSession = Arc::new(StdMutex::new(create_cezih_session()));
+
                     // Don't set ws_connected yet — wait for server "connected" confirmation
                     {
                         let mut s = state.write().await;
                         s.last_error = None;
                     }
-                    let mut status_interval = tokio::time::interval(Duration::from_secs(30));
+                    let mut status_interval = tokio::time::interval(Duration::from_secs(10));
 
                     loop {
                         tokio::select! {
@@ -221,30 +403,56 @@ pub fn spawn_connection_task(
                                                         s.agent_id = Some(id.to_string());
                                                         info!("Agent ID: {}", id);
                                                     }
-                                                    // Send initial status
-                                                    let status = build_status_message();
-                                                    let _ = write.send(Message::Text(status.to_string().into())).await;
-                                                    // Update state
-                                                    let card = check_card_status();
-                                                    let vpn = check_vpn_status();
-                                                    let mut s = state.write().await;
-                                                    s.reader_available = card.reader_available;
-                                                    s.card_inserted = card.card_inserted;
-                                                    s.card_holder = card.card_holder;
-                                                    s.vpn_connected = vpn.connected;
-                                                    s.vpn_name = vpn.connection_name;
+                                                    // Send initial status (blocking I/O on thread pool, 5s timeout)
+                                                    match tokio::time::timeout(
+                                                        Duration::from_secs(5),
+                                                        tokio::task::spawn_blocking(collect_status),
+                                                    ).await {
+                                                        Ok(Ok(snap)) => {
+                                                            let _ = write.send(Message::Text(snap.ws_message.to_string().into())).await;
+                                                            apply_status(&state, &snap).await;
+
+                                                            // Session warmup: if VPN+card active and backend sent a
+                                                            // CEZIH URL, establish the mTLS session now (single PIN
+                                                            // prompt on connect instead of on first user action).
+                                                            let warmup_url = parsed.get("cezih_warmup_url")
+                                                                .and_then(|v| v.as_str())
+                                                                .unwrap_or("")
+                                                                .to_string();
+                                                            if snap.vpn_connected && snap.card_inserted && !warmup_url.is_empty() {
+                                                                let sess = Arc::clone(&cezih_session);
+                                                                let tx = outbound_tx.clone();
+                                                                tokio::spawn(async move {
+                                                                    info!("Warming up CEZIH session (PIN prompt expected)...");
+                                                                    let warmup_msg = json!({
+                                                                        "request_id": "warmup",
+                                                                        "method": "GET",
+                                                                        "url": warmup_url,
+                                                                        "headers": {},
+                                                                    });
+                                                                    let resp = handle_http_proxy(warmup_msg, sess).await;
+                                                                    if resp.contains("\"status_code\"") {
+                                                                        info!("CEZIH session established — future requests won't prompt for PIN");
+                                                                    } else {
+                                                                        warn!("CEZIH session warmup failed — PIN will be prompted on first request");
+                                                                    }
+                                                                    drop(tx);
+                                                                });
+                                                            }
+                                                        }
+                                                        _ => { warn!("Initial status collection timed out or failed"); }
+                                                    }
                                                 }
                                                 "ping" => {
                                                     let _ = write.send(Message::Text(r#"{"type":"pong"}"#.into())).await;
                                                 }
                                                 "sign_request" => {
-                                                    // Future: handle real signing via smart card
-                                                    info!("Received sign_request (mock)");
+                                                    // TODO: implement real PKCS#11 signing via smart card
+                                                    info!("Received sign_request (placeholder response)");
                                                     let response = json!({
                                                         "type": "sign_response",
                                                         "request_id": parsed.get("request_id"),
-                                                        "signature": "MOCK_SIGNATURE_PLACEHOLDER",
-                                                        "mock": true
+                                                        "signature": "PLACEHOLDER_PENDING_PKCS11",
                                                     });
                                                     let _ = write.send(Message::Text(response.to_string().into())).await;
                                                 }
@@ -256,9 +464,9 @@ pub fn spawn_connection_task(
                                                         parsed.get("url").and_then(|v| v.as_str()).unwrap_or("?"));
                                                     let tx = outbound_tx.clone();
                                                     let p = parsed.clone();
-                                                    let aid = agent_id.clone().unwrap_or_default();
+                                                    let sess = Arc::clone(&cezih_session);
                                                     tokio::spawn(async move {
-                                                        let resp = handle_http_proxy(p, &aid).await;
+                                                        let resp = handle_http_proxy(p, sess).await;
                                                         let _ = tx.send(resp).await;
                                                     });
                                                 }
@@ -289,19 +497,25 @@ pub fn spawn_connection_task(
                                 }
                             }
                             _ = status_interval.tick() => {
-                                let status = build_status_message();
-                                if write.send(Message::Text(status.to_string().into())).await.is_err() {
+                                match tokio::time::timeout(
+                                    Duration::from_secs(5),
+                                    tokio::task::spawn_blocking(collect_status),
+                                ).await {
+                                    Ok(Ok(snap)) => {
+                                        if write.send(Message::Text(snap.ws_message.to_string().into())).await.is_err() {
+                                            break;
+                                        }
+                                        apply_status(&state, &snap).await;
+                                    }
+                                    _ => { warn!("Status collection timed out or failed — skipping heartbeat"); }
+                                }
+                            }
+                            _ = cancel_rx.changed() => {
+                                if *cancel_rx.borrow() {
+                                    info!("WebSocket task cancelled — closing active connection");
+                                    let _ = write.send(Message::Close(None)).await;
                                     break;
                                 }
-                                // Update state
-                                let card = check_card_status();
-                                let vpn = check_vpn_status();
-                                let mut s = state.write().await;
-                                s.reader_available = card.reader_available;
-                                s.card_inserted = card.card_inserted;
-                                s.card_holder = card.card_holder;
-                                s.vpn_connected = vpn.connected;
-                                s.vpn_name = vpn.connection_name;
                             }
                         }
                     }
@@ -312,18 +526,34 @@ pub fn spawn_connection_task(
                         s.ws_connected = false;
                     }
                 }
-                Err(e) => {
+                Ok(Err(e)) => {
                     let mut s = state.write().await;
                     s.ws_connected = false;
                     s.last_error = Some(format!("{}", e));
                     warn!("Connection failed: {}", e);
                 }
+                Err(_) => {
+                    warn!("WebSocket connection timed out after 15s for {}", ws_url);
+                    let mut s = state.write().await;
+                    s.ws_connected = false;
+                    s.last_error = Some("Veza istekla (timeout)".to_string());
+                }
             }
 
-            // Wait before reconnecting (agent_id preserved for next attempt)
+            // Wait before reconnecting — abort early if cancelled
             info!("Reconnecting in {:?}...", backoff);
-            tokio::time::sleep(backoff).await;
+            tokio::select! {
+                _ = tokio::time::sleep(backoff) => {}
+                _ = cancel_rx.changed() => {
+                    if *cancel_rx.borrow() {
+                        info!("WebSocket task cancelled during backoff — stopping");
+                        break;
+                    }
+                }
+            }
             backoff = (backoff * 2).min(max_backoff);
         }
     });
+
+    cancel_tx
 }

@@ -4,14 +4,58 @@ const relaunch = window.__TAURI__.process?.relaunch;
 
 function $(id) { return document.getElementById(id); }
 
+// --- View switching ---
+
+function showSetupView() {
+  $("setup-view").style.display = "block";
+  $("status-view").style.display = "none";
+}
+
+function showStatusView() {
+  $("setup-view").style.display = "none";
+  $("status-view").style.display = "block";
+}
+
 function updateUI(state) {
-  // Cloud connection
+  if (!state.configured) {
+    showSetupView();
+
+    // Show pairing status if active
+    const pairingEl = $("pairing-status");
+    if (state.pairing_status) {
+      pairingEl.textContent = "";
+      const spinner = document.createElement("span");
+      spinner.className = "pairing-spinner";
+      pairingEl.appendChild(spinner);
+      pairingEl.appendChild(document.createTextNode(state.pairing_status));
+    } else {
+      pairingEl.textContent = "";
+    }
+
+    // Show error in setup view
+    const errorBox = $("error-box");
+    if (state.last_error) {
+      errorBox.style.display = "block";
+      errorBox.textContent = state.last_error;
+    } else {
+      errorBox.style.display = "none";
+    }
+    return;
+  }
+
+  showStatusView();
+
+  // Cloud connection — warn if card missing (CEZIH not usable)
   const cloudDot = $("cloud-dot");
   const cloudLabel = $("cloud-label");
   const cloudDetail = $("cloud-detail");
-  if (state.ws_connected) {
+  if (state.ws_connected && state.card_inserted) {
     cloudDot.className = "dot green";
-    cloudLabel.textContent = "Cloud usluga dostupna";
+    cloudLabel.textContent = "CEZIH spreman";
+    cloudDetail.textContent = "";
+  } else if (state.ws_connected && !state.card_inserted) {
+    cloudDot.className = "dot yellow";
+    cloudLabel.textContent = "Umetnite karticu za CEZIH";
     cloudDetail.textContent = "";
   } else {
     cloudDot.className = "dot red";
@@ -51,23 +95,46 @@ function updateUI(state) {
     vpnDetail.textContent = "";
   }
 
-  // Error
-  const errorBox = $("error-box");
-  if (state.last_error) {
-    errorBox.style.display = "block";
-    errorBox.textContent = state.last_error;
+  // Tenant info footer
+  const tenantInfo = $("tenant-info");
+  if (state.backend_url) {
+    try {
+      const url = new URL(state.backend_url);
+      tenantInfo.textContent = url.hostname;
+    } catch {
+      tenantInfo.textContent = state.backend_url;
+    }
+  }
+
+  // Error (status view)
+  const errorBox2 = $("error-box-2");
+  if (state.last_error && !state.ws_connected) {
+    errorBox2.style.display = "block";
+    errorBox2.textContent = state.last_error;
   } else {
-    errorBox.style.display = "none";
+    errorBox2.style.display = "none";
+  }
+}
+
+// --- Config management ---
+
+async function resetConfig() {
+  try {
+    await invoke("clear_config_cmd");
+    // Force immediate UI refresh
+    poll();
+  } catch (e) {
+    console.error("Failed to clear config:", e);
+    alert("Greška pri odspajanju: " + e);
   }
 }
 
 // --- Update logic ---
-// Strategy: download silently → install on next restart → remind after 3 days
 
 const REMINDER_DAYS = 3;
 const STORAGE_KEY = "hm_update_pending";
 
-let updateState = "idle"; // idle | checking | downloading | ready | overdue | error
+let updateState = "idle";
 let updateVersion = "";
 
 function updateUpdateUI() {
@@ -116,7 +183,6 @@ function updateUpdateUI() {
   }
 }
 
-// Persist pending update info so it survives app restarts
 function savePendingUpdate(version) {
   const data = { version, downloadedAt: Date.now() };
   localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
@@ -140,7 +206,6 @@ function isOverdue(pending) {
   return elapsed > REMINDER_DAYS * 24 * 60 * 60 * 1000;
 }
 
-// Check if a previously downloaded update is waiting to be applied
 function checkPendingUpdate() {
   const pending = getPendingUpdate();
   if (!pending) return;
@@ -155,7 +220,7 @@ function checkPendingUpdate() {
 }
 
 async function checkForUpdates() {
-  if (!check) return; // updater plugin not available (dev mode)
+  if (!check) return;
   if (updateState === "downloading") return;
 
   try {
@@ -165,7 +230,6 @@ async function checkForUpdates() {
     const update = await check();
 
     if (!update) {
-      // No update available — check if a previous one is pending
       const pending = getPendingUpdate();
       if (pending) {
         updateVersion = pending.version;
@@ -179,13 +243,11 @@ async function checkForUpdates() {
 
     updateVersion = update.version;
 
-    // Download silently — do NOT install yet
     updateState = "downloading";
     updateUpdateUI();
 
     await update.download();
 
-    // Save to localStorage so it persists across restarts
     savePendingUpdate(update.version);
 
     updateState = "ready";
@@ -211,6 +273,8 @@ async function restartNow() {
     console.error("Restart failed:", e);
   }
 }
+
+// --- Polling ---
 
 async function poll() {
   try {

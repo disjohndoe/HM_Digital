@@ -12,7 +12,7 @@
       {
         "title": "HM Digital Agent",
         "width": 400,
-        "height": 300,
+        "height": 340,
         "resizable": false,
         "center": true,
         "fullscreen": false
@@ -20,7 +20,7 @@
     ],
     "withGlobalTauri": true,
     "security": {
-      "csp": "default-src 'self'; connect-src ws://localhost:8000 wss://* http://localhost:8000 https://*"
+      "csp": "default-src 'self'; connect-src ws://localhost:8000 wss://app.hmdigital.hr http://localhost:8000 https://app.hmdigital.hr https://localhost:8000"
     },
     "trayIcon": {
       "iconPath": "icons/icon.ico",
@@ -40,6 +40,11 @@
     ]
   },
   "plugins": {
+    "deep-link": {
+      "desktop": {
+        "schemes": ["hm-agent"]
+      }
+    },
     "updater": {
       "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IERBNzA0NkQwRDU2OTBCRDQKUldUVUMyblYwRVp3Mm41ODh5N0pIRWhyVFowbWtSV2EzaENXYzcrZGdMQUdMTlRoYjR5RCs1Mm8K",
       "endpoints": [
