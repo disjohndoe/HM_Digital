@@ -19,6 +19,11 @@ jobs:
       - name: Validate backend syntax
         run: python -m py_compile backend/app/main.py
 
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
@@ -27,8 +32,8 @@ jobs:
       - name: Validate frontend build
         working-directory: frontend
         run: |
-          npm ci
-          npx next build
+          pnpm install --frozen-lockfile
+          pnpm build
 
   deploy:
     runs-on: ubuntu-latest
