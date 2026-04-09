@@ -352,11 +352,15 @@ async def sign_bundle_for_cezih(
 ) -> dict:
     """Sign a FHIR Bundle for CEZIH using the agent's smart card.
 
-    Per RFC 7515 (JWS) + RFC 8785 (JCS):
-      Signing input: base64url(header) + "." + base64url(JCS_bundle)
-      Output: base64(JWS_compact) — double base64 for HAPI compatibility.
+    Per CEZIH format (raw concatenation):
+      signature.data = base64( header_json_bytes || bundle_json_bytes || raw_signature_bytes )
 
-    The Bundle must be JCS-canonicalized (sorted keys) before sending to agent.
+    Flow:
+    1. Get cert info (kid, algorithm) from agent
+    2. Build minimal JOSE header: {"kid":"<kid>","alg":"<algorithm>"}
+    3. Concatenate: signing_input = header_bytes + bundle_bytes
+    4. Agent hashes signing_input and signs via NCryptSignHash
+    5. Return header_json + raw signature bytes for assembly
     """
     if not _should_use_agent():
         raise CezihSigningError("Neispravna CEZIH konekcija — agent nije spojen")
@@ -366,40 +370,54 @@ async def sign_bundle_for_cezih(
 
     tenant_id = current_tenant_id.get()
 
-    # The agent receives the JCS-canonicalized bundle JSON and internally:
-    # 1. Finds the cert → gets kid, algorithm
-    # 2. Builds JOSE header: {"kid":"<thumbprint>","alg":"<alg>"}
-    # 3. Standard JWS signing input: base64url(header) + "." + base64url(bundle)
-    # 4. Signs SHA hash via NCryptSignHash
-    # 5. Assembles JWS compact: header.payload.signature (with dots)
-    # 6. Double base64: base64(JWS_compact) → no dots → HAPI compatible
-    # 7. Returns the double-base64 string ready for signature.data
-    data_b64 = base64.b64encode(bundle_json_bytes).decode("ascii")
+    # Step 1: Get certificate info (kid + algorithm) from agent
+    try:
+        cert_info = await agent_manager.get_cert_info(tenant_id, timeout=15.0)
+    except RuntimeError as e:
+        raise CezihSigningError(f"Failed to get cert info: {e}") from e
 
-    logger.info("CEZIH JWS signing via agent (bundle_size=%d)", len(bundle_json_bytes))
+    if "error" in cert_info:
+        raise CezihSigningError(f"Failed to get cert info: {cert_info['error']}")
+
+    kid = cert_info.get("kid", "")
+    algorithm = cert_info.get("algorithm", "RS256")
+
+    # Step 2: Build minimal JOSE header (compact JSON, no spaces)
+    header_json = json.dumps({"kid": kid, "alg": algorithm}, separators=(",", ":"))
+
+    # Step 3: Concatenate header + bundle for signing input
+    header_bytes = header_json.encode("utf-8")
+    signing_input = header_bytes + bundle_json_bytes
+
+    # Step 4: Send to agent for raw signing
+    data_b64 = base64.b64encode(signing_input).decode("ascii")
+
+    logger.info("CEZIH raw signing via agent (input=%d bytes, kid=%.16s, alg=%s)",
+                len(signing_input), kid, algorithm)
 
     try:
-        result = await agent_manager.sign_jws(
+        result = await agent_manager.sign_raw(
             tenant_id,
             data_base64=data_b64,
+            algorithm=algorithm,
             timeout=30.0,
         )
     except RuntimeError as e:
-        raise CezihSigningError(f"Agent JWS signing failed: {e}") from e
+        raise CezihSigningError(f"Agent raw signing failed: {e}") from e
 
     if "error" in result:
-        logger.warning("Agent sign_jws failed: %s — falling back to CMS", result["error"])
-        return await _sign_bundle_cms_fallback(bundle_json_bytes)
+        raise CezihSigningError(f"Agent raw signing failed: {result['error']}")
 
-    jws_base64 = result.get("jws_base64", "")
-    kid = result.get("kid", "unknown")
-    algorithm = result.get("algorithm", "ES256")
+    sig_b64 = result.get("signature", "")
+    signature_bytes = base64.b64decode(sig_b64)
 
-    logger.info("Agent JWS signing OK: alg=%s, jws_b64=%d chars, kid=%.16s", algorithm, len(jws_base64), kid)
+    logger.info("Agent raw signing OK: alg=%s, sig=%d bytes, kid=%.16s",
+                algorithm, len(signature_bytes), kid)
 
     return {
         "success": True,
-        "signature": jws_base64,
+        "header_json": header_json,
+        "signature_bytes": signature_bytes,
         "signing_algorithm": algorithm,
         "signed_at": datetime.now(UTC).isoformat(),
         "kid": kid,

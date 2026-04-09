@@ -250,6 +250,78 @@ class AgentConnectionManager:
         finally:
             _pending_proxy.pop(request_id, None)
 
+    async def get_cert_info(
+        self,
+        tenant_id: UUID,
+        *,
+        timeout: float = 15.0,
+    ) -> dict:
+        """Get certificate info (kid, algorithm) from the agent's smart card.
+
+        No signing performed — just reads cert thumbprint and determines algorithm.
+        """
+        conn = self.get_any_connected(tenant_id)
+        if not conn:
+            raise RuntimeError("No agent connected for this tenant")
+
+        request_id = str(_uuid.uuid4())
+        loop = asyncio.get_event_loop()
+        future: asyncio.Future = loop.create_future()
+        _pending_proxy[request_id] = future
+
+        message = {
+            "type": "get_cert_info",
+            "request_id": request_id,
+        }
+
+        try:
+            await conn.websocket.send_json(message)
+            result = await asyncio.wait_for(future, timeout=timeout)
+            return result
+        except TimeoutError:
+            raise RuntimeError(f"Agent get_cert_info timed out after {timeout}s")
+        finally:
+            _pending_proxy.pop(request_id, None)
+
+    async def sign_raw(
+        self,
+        tenant_id: UUID,
+        *,
+        data_base64: str,
+        algorithm: str = "RS256",
+        timeout: float = 30.0,
+    ) -> dict:
+        """Send raw bytes to agent for signing.
+
+        The agent hashes the data and signs via NCryptSignHash.
+        Returns dict with 'signature' (base64), 'kid', 'algorithm',
+        or 'error' string on failure.
+        """
+        conn = self.get_any_connected(tenant_id)
+        if not conn:
+            raise RuntimeError("No agent connected for this tenant")
+
+        request_id = str(_uuid.uuid4())
+        loop = asyncio.get_event_loop()
+        future: asyncio.Future = loop.create_future()
+        _pending_proxy[request_id] = future
+
+        message = {
+            "type": "sign_raw",
+            "request_id": request_id,
+            "data": data_base64,
+            "algorithm": algorithm,
+        }
+
+        try:
+            await conn.websocket.send_json(message)
+            result = await asyncio.wait_for(future, timeout=timeout)
+            return result
+        except TimeoutError:
+            raise RuntimeError(f"Agent sign_raw timed out after {timeout}s")
+        finally:
+            _pending_proxy.pop(request_id, None)
+
     async def sign_data(
         self,
         tenant_id: UUID,

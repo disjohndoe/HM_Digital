@@ -24,6 +24,24 @@ pub struct SignResult {
     pub kid: String,
 }
 
+/// Certificate info result (lightweight, no signing).
+pub struct CertInfo {
+    /// Certificate thumbprint (SHA-1 hex) — used as JOSE `kid`.
+    pub kid: String,
+    /// JOSE algorithm name: "RS256", "ES256", "ES384", etc.
+    pub algorithm: String,
+}
+
+/// Result of raw signing — just the raw signature bytes + cert metadata.
+pub struct RawSignResult {
+    /// Raw cryptographic signature bytes (NOT base64-encoded).
+    pub signature: Vec<u8>,
+    /// Certificate thumbprint (SHA-1 hex).
+    pub kid: String,
+    /// JOSE algorithm used.
+    pub algorithm: String,
+}
+
 /// Result of JWS signing — contains the signature data ready for Bundle.signature.data.
 pub struct JwsSignResult {
     /// Double-encoded: base64(JWS_compact_with_dots).
@@ -271,6 +289,234 @@ unsafe fn sign_for_jws_inner(bundle_json: &[u8]) -> Result<JwsSignResult, String
     CertCloseStore(store, 0);
 
     Err("NCryptSignHash failed with all certificates. Smart card may not support CNG signing.".into())
+}
+
+/// Get certificate info (kid + algorithm) from the smart card.
+/// Lightweight query — no signing performed.
+pub fn get_cert_info() -> Result<CertInfo, String> {
+    unsafe { get_cert_info_inner() }
+}
+
+unsafe fn get_cert_info_inner() -> Result<CertInfo, String> {
+    const ENCODING: u32 = X509_ASN_ENCODING | PKCS_7_ASN_ENCODING;
+
+    let store_name: Vec<u16> = "My\0".encode_utf16().collect();
+    let store = CertOpenSystemStoreW(0, store_name.as_ptr());
+    if store.is_null() {
+        return Err("Failed to open certificate store".into());
+    }
+
+    let certs = find_all_certs(store, ENCODING);
+    if certs.is_empty() {
+        CertCloseStore(store, 0);
+        return Err("No certificates found. Is the AKD smart card inserted?".into());
+    }
+
+    for (cert_ctx, cert_label) in &certs {
+        let kid = match get_cert_thumbprint(*cert_ctx) {
+            Ok(k) => k,
+            Err(_) => continue,
+        };
+
+        info!("CertInfo: trying {} (kid={:.16})...", cert_label, kid);
+
+        let mut key_handle: usize = 0;
+        let mut key_spec: u32 = 0;
+        let mut must_free: i32 = 0;
+
+        let ok = CryptAcquireCertificatePrivateKey(
+            *cert_ctx,
+            0x00040000, // CRYPT_ACQUIRE_ONLY_NCRYPT_KEY_FLAG
+            ptr::null(),
+            &mut key_handle as *mut usize as *mut _,
+            &mut key_spec,
+            &mut must_free,
+        );
+
+        if ok == 0 {
+            let err = GetLastError();
+            warn!("CertInfo: CryptAcquireCertificatePrivateKey failed for {}: 0x{:08x}", cert_label, err);
+            continue;
+        }
+
+        // Probe signature size to determine algorithm
+        let probe_hash = [0u8; 48];
+        let mut sig_len: u32 = 0;
+        let status = NCryptSignHash(
+            key_handle,
+            ptr::null(),
+            probe_hash.as_ptr(),
+            48,
+            ptr::null_mut(),
+            0,
+            &mut sig_len,
+            0,
+        );
+
+        if must_free != 0 { NCryptFreeObject(key_handle); }
+
+        if status != 0 {
+            warn!("CertInfo: NCryptSignHash size query failed for {}: 0x{:08x}", cert_label, status as u32);
+            continue;
+        }
+
+        let algorithm = match sig_len as usize {
+            64 => "ES256",
+            96 => "ES384",
+            132 => "ES512",
+            256 => "RS256",
+            _ => "RS256",
+        };
+
+        info!("CertInfo: found cert kid={:.16}, alg={}", kid, algorithm);
+
+        // Cleanup
+        for (ctx, _) in &certs {
+            CertFreeCertificateContext(*ctx);
+        }
+        CertCloseStore(store, 0);
+
+        return Ok(CertInfo {
+            kid,
+            algorithm: algorithm.to_string(),
+        });
+    }
+
+    for (ctx, _) in &certs {
+        CertFreeCertificateContext(*ctx);
+    }
+    CertCloseStore(store, 0);
+
+    Err("No usable signing certificate found. Smart card may not support CNG.".into())
+}
+
+/// Sign raw bytes using the smart card.
+/// Hashes the data with the specified algorithm, then signs via NCryptSignHash.
+/// Returns raw signature bytes — NO JWS construction, NO base64 encoding.
+pub fn sign_raw(data: &[u8], algorithm: &str) -> Result<RawSignResult, String> {
+    unsafe { sign_raw_inner(data, algorithm) }
+}
+
+unsafe fn sign_raw_inner(data: &[u8], algorithm: &str) -> Result<RawSignResult, String> {
+    const ENCODING: u32 = X509_ASN_ENCODING | PKCS_7_ASN_ENCODING;
+
+    let store_name: Vec<u16> = "My\0".encode_utf16().collect();
+    let store = CertOpenSystemStoreW(0, store_name.as_ptr());
+    if store.is_null() {
+        return Err("Failed to open certificate store".into());
+    }
+
+    let certs = find_all_certs(store, ENCODING);
+    if certs.is_empty() {
+        CertCloseStore(store, 0);
+        return Err("No certificates found. Is the AKD smart card inserted?".into());
+    }
+
+    for (cert_ctx, cert_label) in &certs {
+        let kid = match get_cert_thumbprint(*cert_ctx) {
+            Ok(k) => k,
+            Err(_) => continue,
+        };
+
+        info!("RawSign: trying {} (kid={:.16})...", cert_label, kid);
+
+        let mut key_handle: usize = 0;
+        let mut key_spec: u32 = 0;
+        let mut must_free: i32 = 0;
+
+        let ok = CryptAcquireCertificatePrivateKey(
+            *cert_ctx,
+            0x00040000,
+            ptr::null(),
+            &mut key_handle as *mut usize as *mut _,
+            &mut key_spec,
+            &mut must_free,
+        );
+
+        if ok == 0 {
+            warn!("RawSign: CryptAcquireCertificatePrivateKey failed for {}", cert_label);
+            continue;
+        }
+
+        // Get signature size
+        let probe_hash = [0u8; 48];
+        let mut sig_len: u32 = 0;
+        let status = NCryptSignHash(
+            key_handle,
+            ptr::null(),
+            probe_hash.as_ptr(),
+            48,
+            ptr::null_mut(),
+            0,
+            &mut sig_len,
+            0,
+        );
+
+        if status != 0 {
+            warn!("RawSign: NCryptSignHash size query failed for {}", cert_label);
+            if must_free != 0 { NCryptFreeObject(key_handle); }
+            continue;
+        }
+
+        // Hash the data
+        let hash_bytes: Vec<u8> = match algorithm {
+            "ES384" => {
+                let mut h = Sha384::new();
+                h.update(data);
+                h.finalize().to_vec()
+            }
+            _ => {
+                let mut h = Sha256::new();
+                h.update(data);
+                h.finalize().to_vec()
+            }
+        };
+
+        info!("RawSign: signing {} bytes with {} (hash={} bytes)", data.len(), algorithm, hash_bytes.len());
+
+        // Sign the hash
+        let mut sig_buf = vec![0u8; sig_len as usize];
+        let mut actual_len = sig_len;
+        let status = NCryptSignHash(
+            key_handle,
+            ptr::null(),
+            hash_bytes.as_ptr(),
+            hash_bytes.len() as u32,
+            sig_buf.as_mut_ptr(),
+            sig_len,
+            &mut actual_len,
+            0,
+        );
+
+        if must_free != 0 { NCryptFreeObject(key_handle); }
+
+        if status != 0 {
+            warn!("RawSign: NCryptSignHash failed for {}: 0x{:08x}", cert_label, status as u32);
+            continue;
+        }
+
+        sig_buf.truncate(actual_len as usize);
+        info!("RawSign: OK — {} bytes, kid={:.16}, alg={}", sig_buf.len(), kid, algorithm);
+
+        // Cleanup
+        for (ctx, _) in &certs {
+            CertFreeCertificateContext(*ctx);
+        }
+        CertCloseStore(store, 0);
+
+        return Ok(RawSignResult {
+            signature: sig_buf,
+            kid,
+            algorithm: algorithm.to_string(),
+        });
+    }
+
+    for (ctx, _) in &certs {
+        CertFreeCertificateContext(*ctx);
+    }
+    CertCloseStore(store, 0);
+
+    Err("NCryptSignHash failed with all certificates.".into())
 }
 
 /// Sign data using the AKD smart card signing certificate (CMS mode).

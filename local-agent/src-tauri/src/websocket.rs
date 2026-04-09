@@ -588,6 +588,99 @@ pub fn spawn_connection_task(
                                                     };
                                                     let _ = write.send(Message::Text(response.to_string().into())).await;
                                                 }
+                                                "get_cert_info" => {
+                                                    let rid = parsed.get("request_id").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                                                    info!("Received get_cert_info {}", &rid[..rid.len().min(8)]);
+
+                                                    let result = tokio::task::spawn_blocking(|| {
+                                                        crate::signing::get_cert_info()
+                                                    }).await;
+
+                                                    let response = match result {
+                                                        Ok(Ok(info)) => {
+                                                            info!("Cert info OK: kid={:.16}, alg={}", info.kid, info.algorithm);
+                                                            json!({
+                                                                "type": "get_cert_info_response",
+                                                                "request_id": &rid,
+                                                                "kid": info.kid,
+                                                                "algorithm": info.algorithm,
+                                                            })
+                                                        }
+                                                        Ok(Err(e)) => {
+                                                            error!("get_cert_info failed: {}", e);
+                                                            json!({
+                                                                "type": "get_cert_info_response",
+                                                                "request_id": &rid,
+                                                                "error": e,
+                                                            })
+                                                        }
+                                                        Err(e) => {
+                                                            error!("get_cert_info task panicked: {}", e);
+                                                            json!({
+                                                                "type": "get_cert_info_response",
+                                                                "request_id": &rid,
+                                                                "error": format!("Internal error: {}", e),
+                                                            })
+                                                        }
+                                                    };
+                                                    let _ = write.send(Message::Text(response.to_string().into())).await;
+                                                }
+                                                "sign_raw" => {
+                                                    let rid = parsed.get("request_id").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                                                    let data_b64 = parsed.get("data").and_then(|v| v.as_str()).unwrap_or("");
+                                                    let algorithm = parsed.get("algorithm").and_then(|v| v.as_str()).unwrap_or("RS256");
+                                                    info!("Received sign_raw {} ({} chars, alg={})", &rid[..rid.len().min(8)], data_b64.len(), algorithm);
+
+                                                    let sign_result = {
+                                                        let data_bytes = match base64::engine::general_purpose::STANDARD.decode(data_b64) {
+                                                            Ok(b) => b,
+                                                            Err(e) => {
+                                                                let response = json!({
+                                                                    "type": "sign_raw_response",
+                                                                    "request_id": &rid,
+                                                                    "error": format!("Invalid base64 data: {}", e),
+                                                                });
+                                                                let _ = write.send(Message::Text(response.to_string().into())).await;
+                                                                continue;
+                                                            }
+                                                        };
+                                                        let alg = algorithm.to_string();
+                                                        tokio::task::spawn_blocking(move || {
+                                                            crate::signing::sign_raw(&data_bytes, &alg)
+                                                        }).await
+                                                    };
+
+                                                    let response = match sign_result {
+                                                        Ok(Ok(result)) => {
+                                                            info!("Raw signing OK: alg={}, sig={} bytes, kid={:.16}",
+                                                                  result.algorithm, result.signature.len(), result.kid);
+                                                            json!({
+                                                                "type": "sign_raw_response",
+                                                                "request_id": &rid,
+                                                                "signature": base64::engine::general_purpose::STANDARD.encode(&result.signature),
+                                                                "kid": result.kid,
+                                                                "algorithm": result.algorithm,
+                                                            })
+                                                        }
+                                                        Ok(Err(e)) => {
+                                                            error!("Raw signing failed: {}", e);
+                                                            json!({
+                                                                "type": "sign_raw_response",
+                                                                "request_id": &rid,
+                                                                "error": e,
+                                                            })
+                                                        }
+                                                        Err(e) => {
+                                                            error!("Raw signing task panicked: {}", e);
+                                                            json!({
+                                                                "type": "sign_raw_response",
+                                                                "request_id": &rid,
+                                                                "error": format!("Internal error: {}", e),
+                                                            })
+                                                        }
+                                                    };
+                                                    let _ = write.send(Message::Text(response.to_string().into())).await;
+                                                }
                                                 "http_proxy_request" => {
                                                     let rid = parsed.get("request_id").and_then(|v| v.as_str()).unwrap_or("").to_string();
                                                     info!("HTTP proxy request {} — {} {}",

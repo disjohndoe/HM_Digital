@@ -113,7 +113,8 @@ async def agent_websocket(websocket: WebSocket):
                 req_id = msg.get("request_id", "")
                 agent_manager.resolve_proxy_response(req_id, msg)
 
-            elif msg_type in ("sign_response", "sign_error", "sign_jws_response"):
+            elif msg_type in ("sign_response", "sign_error", "sign_jws_response",
+                              "get_cert_info_response", "sign_raw_response"):
                 req_id = msg.get("request_id", "")
                 logger.info("Received %s from agent %s for tenant %s", msg_type, agent_id[:8], tenant_id)
                 agent_manager.resolve_proxy_response(req_id, msg)
