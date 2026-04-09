@@ -149,19 +149,23 @@ async def add_signature(
     sign_fn: Any = None,
     http_client: httpx.AsyncClient | None = None,
 ) -> dict[str, Any]:
-    """Add a digital signature to the Bundle per CEZIH raw concatenation format.
+    """Add a digital signature to the Bundle per CEZIH JWS format.
 
-    signature.data = base64( header_json_bytes || bundle_json_bytes || raw_signature_bytes )
+    Uses agent's sign_for_jws which produces proper RFC 7515 JWS compact
+    with JOSE header containing alg, kid, jwk, x5c (full cert chain).
+
+    signature.data = base64(JWS_compact) — double base64 for HAPI compatibility.
 
     Flow:
     1. Add signature object with data="" to the bundle
-    2. Serialize bundle to JSON (preserve insertion order, no JCS sorting)
-    3. Send to agent → agent returns header_json + raw signature bytes
-    4. Assemble: base64(header_bytes + bundle_bytes + sig_bytes)
-    5. Set bundle.signature.data to the assembled string
+    2. Serialize bundle to compact JSON (no whitespace, preserve insertion order)
+    3. Send to agent → agent builds JOSE header (with x5c cert), signs per RFC 7515
+    4. Agent returns base64(base64url(header).base64url(payload).base64url(sig))
+    5. Set bundle.signature.data to the returned string
     """
     import base64 as _base64
-    from app.services.cezih_signing import sign_bundle_for_cezih
+    from app.services.agent_connection_manager import agent_manager
+    from app.services.cezih.client import current_tenant_id
 
     # Add signature structure WITH data="" (empty string).
     bundle["signature"] = {
@@ -176,20 +180,36 @@ async def add_signature(
         "data": "",
     }
 
-    # Serialize bundle to JSON — NO JCS sorting (preserve Python dict insertion order).
+    # Serialize bundle to compact JSON (no whitespace, preserve insertion order).
     bundle_json_bytes = json.dumps(bundle, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
 
     if sign_fn:
+        # Test hook — custom sign function
         result = await sign_fn(bundle_json_bytes)
+        bundle["signature"]["data"] = result.get("jws_base64", "")
     else:
-        result = await sign_bundle_for_cezih(bundle_json_bytes, http_client=http_client)
+        # Production: use agent's JWS signing (builds JOSE header with x5c + signs)
+        tenant_id = current_tenant_id.get()
+        data_b64 = _base64.b64encode(bundle_json_bytes).decode("ascii")
 
-    # Assemble signature.data = base64(header_json || bundle_json || raw_sig_bytes)
-    header_json_bytes = result["header_json"].encode("utf-8")
-    signature_bytes = result["signature_bytes"]
+        result = await agent_manager.sign_jws(
+            tenant_id,
+            data_base64=data_b64,
+            timeout=30.0,
+        )
 
-    combined = header_json_bytes + bundle_json_bytes + signature_bytes
-    bundle["signature"]["data"] = _base64.b64encode(combined).decode("ascii")
+        if "error" in result:
+            from app.services.cezih.exceptions import CezihSigningError
+            raise CezihSigningError(f"Agent JWS signing failed: {result['error']}")
+
+        jws_base64 = result.get("jws_base64", "")
+        if not jws_base64:
+            from app.services.cezih.exceptions import CezihSigningError
+            raise CezihSigningError("Agent returned empty JWS signature")
+
+        logger.info("JWS signature: kid=%s, alg=%s, data=%d chars",
+                     result.get("kid", "?"), result.get("algorithm", "?"), len(jws_base64))
+        bundle["signature"]["data"] = jws_base64
 
     return bundle
 

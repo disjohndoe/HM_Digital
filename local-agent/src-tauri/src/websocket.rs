@@ -7,7 +7,7 @@ use log::{error, info, warn};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::sync::Mutex as StdMutex;
-use curl::easy::{Easy2, Handler, WriteError, List, PostRedirections, SslOpt};
+use curl::easy::{Easy2, Handler, WriteError, InfoType, List, PostRedirections, SslOpt};
 use tokio::sync::{mpsc, watch, RwLock};
 use tokio_tungstenite::tungstenite::Message;
 
@@ -121,6 +121,22 @@ impl Handler for CezihCollector {
         self.response_body.extend_from_slice(data);
         Ok(data.len())
     }
+
+    fn debug(&mut self, kind: InfoType, data: &[u8]) {
+        // Log curl verbose output for TLS/cert diagnostics
+        let text = String::from_utf8_lossy(data);
+        let prefix = match kind {
+            InfoType::Text => "* ",
+            InfoType::HeaderIn => "< ",
+            InfoType::HeaderOut => "> ",
+            _ => return, // Skip raw data (SSL/body bytes)
+        };
+        for line in text.lines() {
+            if !line.is_empty() {
+                info!("curl {}{}", prefix, line);
+            }
+        }
+    }
 }
 
 /// Shared libcurl session — created once per WS connection.
@@ -189,14 +205,10 @@ fn do_cezih_request(
     // URL
     session.url(url).map_err(|e| e.to_string())?;
 
-    // Headers — skip Authorization only for port 8443 (mTLS handles auth there).
-    // Port 9443 (reference services) needs the Bearer token.
-    let is_mtls_port = url.contains(":8443");
+    // Pass ALL headers including Authorization — encounter-services may need Bearer token
+    // even on port 8443 (mTLS provides cert identity, Bearer provides auth context).
     let mut list = List::new();
     for (k, v) in headers {
-        if k.eq_ignore_ascii_case("authorization") && is_mtls_port {
-            continue;
-        }
         list.append(&format!("{}: {}", k, v)).map_err(|e| e.to_string())?;
     }
     // Disable Expect: 100-continue (libcurl default on POST, CEZIH may not support)
@@ -223,6 +235,12 @@ fn do_cezih_request(
                 session.post_fields_copy(b).map_err(|e| e.to_string())?;
             }
         }
+    }
+
+    // Enable verbose mode for POST to encounter-services (debug ERR_DS_1002)
+    if method.eq_ignore_ascii_case("POST") && url.contains("encounter-services") {
+        session.verbose(true).map_err(|e| e.to_string())?;
+        info!("Verbose curl enabled for POST to encounter-services");
     }
 
     // Execute (blocking — PIN prompted on first TLS handshake, cached after)
@@ -256,7 +274,6 @@ fn do_cezih_request(
 
         let mut list = List::new();
         for (k, v) in headers {
-            if k.eq_ignore_ascii_case("authorization") && is_mtls_port { continue; }
             list.append(&format!("{}: {}", k, v)).map_err(|e| e.to_string())?;
         }
         list.append("Expect:").map_err(|e| e.to_string())?;
