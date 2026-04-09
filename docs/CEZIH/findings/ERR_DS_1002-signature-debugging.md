@@ -1,64 +1,58 @@
 ---
 date: 2026-04-09
-topic: signing
+topic: ERR_DS_1002 root cause
 status: active
 ---
 
-# ERR_DS_1002 — Signature Debugging History
+# ERR_DS_1002 — Root Cause: NOT the Signature
 
-## CRITICAL FINDING (2026-04-09 session 2)
+## KEY CONCLUSION
 
-**ERR_DS_1002 occurs even WITHOUT any signature in the Bundle.**
+**ERR_DS_1002 is NOT a signature problem. Stop debugging signature format.**
 
-Sending a Bundle with NO `signature` field at all returns the exact same ERR_DS_1002 error. This proves:
-- ERR_DS_1002 is **NOT about our JWS signature format**
-- The error is about something else entirely (possibly mTLS cert linkage, session-level signing, or a validation unrelated to Bundle.signature)
-- All format permutations (JWS, detached JWS, raw concat) were irrelevant
+Proven by sending a Bundle with NO `signature` field → same ERR_DS_1002 (commit ec92dcc).
+54 commits of signature experiments were wasted effort. The real issue is elsewhere.
 
-### Evidence
+## Primary Suspects (investigate in this order)
+
+### 1. Missing `Encounter.type` slices (FIXED 2026-04-09)
+The `hr-encounter` profile (cezih.osnova 0.2.3) defines two type slices:
+- `VrstaPosjete` → `CodeSystem/vrsta-posjete` (prisutnost pacijenta)
+- `TipPosjete` → `CodeSystem/hr-tip-posjete` (primarna/SKZZ/hosp.)
+
+**Our Encounter was missing BOTH.** Parameters existed in the function signature but were never used. Fixed in `message_builder.py` — both slices now included.
+
+**This is the most likely cause of ERR_DS_1002.** Retest with the fix before investigating anything else.
+
+### 2. Certificate not linked to practitioner
+mTLS cert (OIB 15881939647) may not be registered as authorized for test doctor HZJZ 7659059 / institution 999001464.
+
+### 3. Other FHIR validation failures
+ERR_DS_1002 may be a generic server-side validation error, not specifically about digital signatures. The error code name is misleading.
+
+### 4. Test environment misconfiguration
+Test env provisioned 2026-04-07, may not be fully set up.
+
+## Next Steps
+
+1. **Deploy the Encounter.type fix and retest TC12** — if this resolves ERR_DS_1002, the 54 signature commits were all chasing the wrong problem
+2. If still failing, contact HZZO and ask what ERR_DS_1002 means for a valid Bundle
+3. Only after confirming the message structure is correct, switch signing to JWS format per spec 3.4
+
+## Evidence: Signature Is NOT the Cause
+
 ```
 POST encounter-services/api/v1/$process-message → 400 (232ms)
 Body: 2389 chars, NO "signature" field in Bundle
 Response: ERR_DS_1002 (same error as with signature)
 ```
 
-## Chronological Attempts
+54 commits tested every signature permutation — JWS, raw concat, detached, with/without x5c/jwk, JCS sorted, unsorted, double base64, single base64, CMS/PKCS#7. ALL returned ERR_DS_1002.
 
-### Session 1 (2026-04-08)
+## Signature Format (for later, after message structure is confirmed)
 
-| # | Format | JOSE Header | Result |
-|---|--------|-------------|--------|
-| 1 | JWS compact | kid+alg | HAPI-1821 (dots invalid) |
-| 2 | Raw concatenation | kid+alg | ERR_DS_1002 |
-| 3 | Raw bundle hash | none | ERR_DS_1002 |
-| 4 | JWS+JCS+double-b64 | kid+alg | ERR_DS_1002 |
-| 5 | JWS+JCS+double-b64 | kid+alg+x5c | ERR_DS_1002 |
-| 6 | JWS+JCS+double-b64 | kid+alg (minimal) | ERR_DS_1002 |
-| 7 | JWS+JCS+double-b64 | kid+alg+jwk+x5c | ERR_DS_1002 |
-
-POST redirect bug found and fixed (CURLOPT_POSTREDIR).
-
-### Session 2 (2026-04-09)
-
-| # | Format | JOSE Header | Data Field | Sorting | Result |
-|---|--------|-------------|------------|---------|--------|
-| 8 | JWS+JCS+double-b64 | alg+kid+jwk+x5c (full) | data="" | JCS | ERR_DS_1002 |
-| 9 | Detached JWS (empty payload) | alg+kid+jwk+x5c (full) | data="" | JCS | ERR_DS_1002 |
-| 10 | Raw concat+single-b64 | alg+kid (minimal) | data="" | Not sorted | ERR_DS_1002 |
-| **11** | **NO SIGNATURE AT ALL** | **N/A** | **N/A** | **N/A** | **ERR_DS_1002** |
-
-Self-verification (BCryptVerifySignature) PASSED in attempts 8-10.
-
-## Root Cause Analysis
-
-ERR_DS_1002 is NOT triggered by the Bundle signature. Possible causes:
-1. **Certificate not linked to practitioner** — mTLS cert (OIB 15881939647) may not be registered as authorized for test doctor HZJZ 7659059 / institution 999001464
-2. **Session-level signing** — CEZIH may expect a different kind of digital signature at the HTTP/session level, not in the FHIR Bundle
-3. **Generic validation error** — ERR_DS_1002 may be a catch-all error code that includes non-signature validation failures
-4. **Test environment misconfiguration** — The test environment was provisioned 2026-04-07 but may not be fully set up
-
-## Action Items
-- [ ] **Contact HZZO** — Ask specifically what ERR_DS_1002 means for an UNSIGNED Bundle
-- [ ] Ask if the test cert needs explicit registration for the test doctor
-- [ ] Ask for server-side logs showing what validation fails
-- [ ] Ask whether Bundle.signature is required at all for $process-message
+Per spec 3.4 and Simplifier StructureDefinition `hr-request-message`:
+- Standard JWS compact (RFC 7515) with double base64
+- JOSE header: `alg` (RS1 for smart card), `jwk`, `x5c`
+- `sigFormat`/`targetFormat`/`onBehalfOf` PROHIBITED (max 0)
+- See `cezih-official-signature-format.md` for full details

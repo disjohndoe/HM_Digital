@@ -854,6 +854,7 @@ async def dispatch_visit_action(
     action: str,
     patient_mbo: str,
     *,
+    nacin_prijema: str = "6",
     db: AsyncSession | None = None,
     user_id: UUID | None = None,
     tenant_id: UUID | None = None,
@@ -880,23 +881,32 @@ async def dispatch_visit_action(
                 detail=f"Nepoznata akcija posjete: {action}. Dozvoljene: close, storno, reopen.",
             )
         event_code = action_info["code"]
-        builder_map = {
-            "1.3": build_encounter_close,
-            "1.4": build_encounter_cancel,
-            "1.5": build_encounter_reopen,
-        }
-        builder_fn = builder_map.get(event_code)
-        if not builder_fn:
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Nema builder funkcije za event code {event_code}",
+
+        if event_code == "1.5":
+            # Reopen has different fields — only identifier, status, class, serviceProvider
+            encounter = build_encounter_reopen(
+                encounter_id=visit_id,
+                nacin_prijema=nacin_prijema,
+                org_code=org_code or "",
             )
-        encounter = builder_fn(
-            encounter_id=visit_id,
-            patient_mbo=patient_mbo,
-            practitioner_id=practitioner_id,
-            org_code=org_code or "",
-        )
+        else:
+            builder_map = {
+                "1.3": build_encounter_close,
+                "1.4": build_encounter_cancel,
+            }
+            builder_fn = builder_map.get(event_code)
+            if not builder_fn:
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail=f"Nema builder funkcije za event code {event_code}",
+                )
+            encounter = builder_fn(
+                encounter_id=visit_id,
+                patient_mbo=patient_mbo,
+                nacin_prijema=nacin_prijema,
+                practitioner_id=practitioner_id,
+                org_code=org_code or "",
+            )
         bundle_profile = ENCOUNTER_EVENT_PROFILE_MAP.get(event_code)
         profile_urls = {
             "bundle": bundle_profile,

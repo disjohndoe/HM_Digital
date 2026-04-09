@@ -9,8 +9,9 @@ from __future__ import annotations
 import json
 import logging
 import uuid
-from datetime import UTC, datetime
+from datetime import datetime
 from typing import Any
+from zoneinfo import ZoneInfo
 
 import httpx
 
@@ -27,7 +28,7 @@ SIGNATURE_TYPE_CODE = "1.2.840.10065.1.12.1.1"  # Author's signature
 ID_MBO = "http://fhir.cezih.hr/specifikacije/identifikatori/MBO"
 ID_ORG = "http://fhir.cezih.hr/specifikacije/identifikatori/HZZO-sifra-zdravstvene-organizacije"
 ID_PRACTITIONER = "http://fhir.cezih.hr/specifikacije/identifikatori/HZJZ-broj-zdravstvenog-djelatnika"
-ID_CASE_GLOBAL = "http://fhir.cezih.hr/specifikacije/identifikatori/identifikator-slucaja"
+ID_CASE_GLOBAL = "http://fhir.cezih.hr/specifikacije/identifikatori/slucaj"
 ID_CASE_LOCAL = "http://fhir.cezih.hr/specifikacije/identifikatori/lokalni-identifikator-slucaja"
 ID_ENCOUNTER = "http://fhir.cezih.hr/specifikacije/identifikatori/identifikator-posjete"
 
@@ -57,8 +58,11 @@ def practitioner_ref(hzjz_id: str) -> dict[str, Any]:
     return {"type": "Practitioner", "identifier": {"system": ID_PRACTITIONER, "value": hzjz_id}}
 
 
+_TZ_ZAGREB = ZoneInfo("Europe/Zagreb")
+
+
 def _now_iso() -> str:
-    return datetime.now(UTC).isoformat()
+    return datetime.now(_TZ_ZAGREB).isoformat()
 
 
 # --- Message Bundle Builder ---
@@ -273,9 +277,21 @@ def build_encounter_create(
             "code": nacin_prijema,
             "display": NACIN_PRIJEMA_MAP.get(nacin_prijema, nacin_prijema),
         },
+        "type": [],
         "subject": patient_ref(patient_mbo),
         "period": {"start": _now_iso()},
     }
+    # Encounter.type slices per hr-encounter profile (cezih.osnova 0.2.3)
+    if vrsta_posjete:
+        encounter["type"].append({
+            "coding": [{"system": CS_VRSTA_POSJETE, "code": vrsta_posjete}],
+        })
+    if tip_posjete:
+        encounter["type"].append({
+            "coding": [{"system": CS_TIP_POSJETE, "code": tip_posjete}],
+        })
+    if not encounter["type"]:
+        del encounter["type"]
     if org_code:
         encounter["serviceProvider"] = org_ref(org_code)
     if practitioner_id:
@@ -292,6 +308,8 @@ def build_encounter_update(
     encounter_id: str,
     patient_mbo: str,
     nacin_prijema: str = "6",
+    vrsta_posjete: str = "1",
+    tip_posjete: str = "1",
     reason: str | None = None,
     practitioner_id: str = "",
     org_code: str = "",
@@ -299,7 +317,7 @@ def build_encounter_update(
 ) -> dict[str, Any]:
     """Build FHIR Encounter resource for visit update (event code 1.2).
 
-    CEZIH example includes: extension, identifier, class, subject, participant,
+    CEZIH example includes: extension, identifier, class, type, subject, participant,
     period, diagnosis, serviceProvider. See docs/CEZIH/Posjete/.
     """
     encounter: dict[str, Any] = {
@@ -320,8 +338,20 @@ def build_encounter_update(
             "code": nacin_prijema,
             "display": NACIN_PRIJEMA_MAP.get(nacin_prijema, nacin_prijema),
         },
+        "type": [],
         "subject": patient_ref(patient_mbo),
+        "period": {"start": _now_iso()},
     }
+    if vrsta_posjete:
+        encounter["type"].append({
+            "coding": [{"system": CS_VRSTA_POSJETE, "code": vrsta_posjete}],
+        })
+    if tip_posjete:
+        encounter["type"].append({
+            "coding": [{"system": CS_TIP_POSJETE, "code": tip_posjete}],
+        })
+    if not encounter["type"]:
+        del encounter["type"]
     if org_code:
         encounter["serviceProvider"] = org_ref(org_code)
     if practitioner_id:
@@ -409,12 +439,8 @@ def build_encounter_cancel(
             "display": NACIN_PRIJEMA_MAP.get(nacin_prijema, nacin_prijema),
         },
     }
-    period: dict[str, str] = {}
-    if period_start:
-        period["start"] = period_start
-    period["end"] = _now_iso()
-    if period:
-        encounter["period"] = period
+    period: dict[str, str] = {"start": period_start or _now_iso(), "end": _now_iso()}
+    encounter["period"] = period
     if org_code:
         encounter["serviceProvider"] = org_ref(org_code)
     if diagnosis_case_id:
@@ -430,24 +456,26 @@ def build_encounter_cancel(
 def build_encounter_reopen(
     *,
     encounter_id: str,
-    patient_mbo: str,
-    practitioner_id: str = "",
+    nacin_prijema: str = "6",
     org_code: str = "",
 ) -> dict[str, Any]:
-    """Build FHIR Encounter resource for visit reopen (event code 1.5)."""
+    """Build FHIR Encounter resource for visit reopen (event code 1.5).
+
+    Per CEZIH official example: identifier, status, class, serviceProvider only.
+    No subject, participant, period, or id fields.
+    """
     encounter: dict[str, Any] = {
         "resourceType": "Encounter",
-        "id": encounter_id,
         "identifier": [{"system": ID_ENCOUNTER, "value": encounter_id}],
         "status": "in-progress",
-        "subject": patient_ref(patient_mbo),
+        "class": {
+            "system": CS_NACIN_PRIJEMA,
+            "code": nacin_prijema,
+            "display": NACIN_PRIJEMA_MAP.get(nacin_prijema, nacin_prijema),
+        },
     }
     if org_code:
         encounter["serviceProvider"] = org_ref(org_code)
-    if practitioner_id:
-        encounter["participant"] = [{
-            "individual": practitioner_ref(practitioner_id),
-        }]
     return encounter
 
 
