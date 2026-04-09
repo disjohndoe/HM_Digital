@@ -786,7 +786,8 @@ async def dispatch_create_visit(
             "1.1", encounter, sender_org_code=org_code, author_practitioner_id=practitioner_id,
             source_oid=source_oid, profile_urls=profile_urls,
         )
-        bundle = await add_signature(bundle, practitioner_id, http_client=http_client)
+        # DIAGNOSTIC: Try without signature to see if ERR_DS_1002 is signature-related
+        # bundle = await add_signature(bundle, practitioner_id, http_client=http_client)
         result = await fhir_client.process_message("encounter-services/api/v1", bundle)
     except CezihError as e:
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=e.message) from e
