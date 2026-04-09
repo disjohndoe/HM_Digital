@@ -504,40 +504,30 @@ async def probe_remote_signer() -> dict:
     except CezihSigningError as e:
         results["get_sign"] = {"error": str(e)}
 
-    # 2. Try POST with a test hash to see expected format
-    test_hash = base64.b64encode(b"test_hash_for_probe").decode()
-    try:
-        resp = await _request_via_agent(
-            method="POST", url=f"{base_url}/sign",
-            headers={"Accept": "application/json", "Content-Type": "application/json"},
-            form_data=None, json_body={"hash": test_hash, "hashAlgorithm": "SHA-256"},
-            timeout=15,
-        )
-        results["post_sign_json"] = resp
-    except CezihSigningError as e:
-        results["post_sign_json"] = {"error": str(e)}
+    # 2. Try different field name combinations
+    test_hash = base64.b64encode(b"\x00" * 32).decode()  # fake SHA-256 hash
 
-    # 3. Try getting cert info
-    try:
-        resp = await _request_via_agent(
-            method="GET", url=f"{base_url}/certificate",
-            headers={"Accept": "application/json"},
-            form_data=None, json_body=None, timeout=15,
-        )
-        results["get_certificate"] = resp
-    except CezihSigningError as e:
-        results["get_certificate"] = {"error": str(e)}
+    field_combos = [
+        ("dataToSign", {"dataToSign": test_hash, "digestAlgorithm": "SHA-256"}),
+        ("digest", {"digest": test_hash, "digestAlgorithm": "SHA-256"}),
+        ("data", {"data": test_hash, "algorithm": "SHA-256"}),
+        ("content", {"content": test_hash}),
+        ("empty", {}),
+    ]
 
-    # 4. Try listing available endpoints
-    try:
-        resp = await _request_via_agent(
-            method="GET", url=f"{base_url}",
-            headers={"Accept": "application/json"},
-            form_data=None, json_body=None, timeout=15,
-        )
-        results["get_api_root"] = resp
-    except CezihSigningError as e:
-        results["get_api_root"] = {"error": str(e)}
+    for name, body in field_combos:
+        try:
+            resp = await _request_via_agent(
+                method="POST", url=f"{base_url}/sign",
+                headers={"Accept": "application/json", "Content-Type": "application/json"},
+                form_data=None, json_body=body, timeout=15,
+            )
+            results[f"post_{name}"] = resp
+        except CezihSigningError as e:
+            results[f"post_{name}"] = {"error": str(e)}
+            # If we get past "Unexpected field" we found the right format
+            if "Unexpected field" not in str(e):
+                break  # different error = progress
 
     return results
 
