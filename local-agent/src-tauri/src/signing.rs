@@ -64,8 +64,8 @@ unsafe fn sign_for_jws_inner(bundle_json: &[u8]) -> Result<JwsSignResult, String
         return Err("No certificates found. Is the AKD smart card inserted?".into());
     }
 
-    // Reverse: try identification cert first (signing cert key link is broken).
-    certs.reverse();
+    // Try signing cert first (SignatureTest has Non-Repudiation key usage,
+    // which CEZIH requires). IdentificationTest is ECDH — wrong for signing.
 
     for (cert_ctx, cert_label) in &certs {
         let kid = match get_cert_thumbprint(*cert_ctx) {
@@ -161,30 +161,26 @@ unsafe fn sign_for_jws_inner(bundle_json: &[u8]) -> Result<JwsSignResult, String
         };
         info!("JWS: JOSE header {} bytes, alg={}, kid={:.16}", jose_header.len(), algorithm, kid);
 
-        // Standard JWS signing input (RFC 7515):
-        //   base64url(header) + "." + base64url(payload)
-        // The payload is the JCS-canonicalized Bundle JSON (caller ensures this).
-        let header_b64url = b64url.encode(jose_header.as_bytes());
-        let payload_b64url = b64url.encode(bundle_json);
-        let signing_input = format!("{}.{}", header_b64url, payload_b64url);
-
-        // Hash with correct algorithm for the key type
+        // Signing input: hash of JOSE header raw bytes + Bundle raw bytes.
+        // Matches the CEZIH example format: base64(jose_raw + bundle_raw + sig_raw).
+        let jose_bytes = jose_header.as_bytes();
         let hash_bytes: Vec<u8> = match algorithm {
             "ES384" => {
                 let mut h = Sha384::new();
-                h.update(signing_input.as_bytes());
+                h.update(jose_bytes);
+                h.update(bundle_json);
                 h.finalize().to_vec()
             }
             _ => {
-                // ES256, RS256, etc. use SHA-256
                 let mut h = Sha256::new();
-                h.update(signing_input.as_bytes());
+                h.update(jose_bytes);
+                h.update(bundle_json);
                 h.finalize().to_vec()
             }
         };
 
-        info!("JWS: signing_input={} chars, hash={} bytes ({})",
-              signing_input.len(), hash_bytes.len(), algorithm);
+        info!("JWS: signing_input={}+{} bytes, hash={} bytes ({})",
+              jose_bytes.len(), bundle_json.len(), hash_bytes.len(), algorithm);
 
         // Sign the hash
         let mut sig_buf = vec![0u8; sig_len as usize];
@@ -210,8 +206,7 @@ unsafe fn sign_for_jws_inner(bundle_json: &[u8]) -> Result<JwsSignResult, String
         sig_buf.truncate(actual_len as usize);
         info!("JWS: raw signature {} bytes", sig_buf.len());
 
-        // Self-verify: import public key from cert and verify our own signature.
-        // This catches crypto issues BEFORE sending to CEZIH.
+        // Self-verify against same signing input
         {
             let mut pub_key_handle: *mut core::ffi::c_void = ptr::null_mut();
             let import_ok = CryptImportPublicKeyInfoEx2(
@@ -242,17 +237,17 @@ unsafe fn sign_for_jws_inner(bundle_json: &[u8]) -> Result<JwsSignResult, String
             }
         }
 
-        // JWS compact serialization (RFC 7515): header.payload.signature
-        let sig_b64url = b64url.encode(&sig_buf);
-        let jws_compact = format!("{}.{}.{}", header_b64url, payload_b64url, sig_b64url);
+        // Output: base64(jose_header_raw + bundle_raw + sig_raw)
+        // Matches CEZIH example — single base64 of raw concatenation, no dots.
+        let mut output_bytes = Vec::with_capacity(jose_bytes.len() + bundle_json.len() + sig_buf.len());
+        output_bytes.extend_from_slice(jose_bytes);
+        output_bytes.extend_from_slice(bundle_json);
+        output_bytes.extend_from_slice(&sig_buf);
+        let jws_base64 = b64std.encode(&output_bytes);
 
-        // Double base64 encode: base64(JWS_compact_string)
-        // Per CEZIH spec: "cijeli digitalni potpis je potrebno još jednom Base64 enkodirati"
-        // The outer base64 produces a string with no dots → HAPI base64Binary compatible.
-        let jws_base64 = b64std.encode(jws_compact.as_bytes());
-
-        info!("JWS: complete! alg={}, jws_compact={} chars, double_b64={} chars",
-              algorithm, jws_compact.len(), jws_base64.len());
+        info!("JWS: complete! alg={}, jose={}+bundle={}+sig={} = {} output={} chars",
+              algorithm, jose_bytes.len(), bundle_json.len(), sig_buf.len(),
+              output_bytes.len(), jws_base64.len());
 
         // Cleanup
         for (ctx, _) in &certs {
