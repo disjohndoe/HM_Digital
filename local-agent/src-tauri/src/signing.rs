@@ -140,32 +140,52 @@ unsafe fn sign_for_jws_inner(bundle_json: &[u8]) -> Result<JwsSignResult, String
             pub_key_blob.cbData as usize,
         );
 
-        // CEZIH example format: minimal JOSE header + raw concat + single base64.
-        // NOT JWS — matches the actual CEZIH working example from docs/Posjete/.
-        info!("SIG: cert DER={} bytes, pub_key={} bytes", cert_der.len(), pub_key_data.len());
+        // Full JOSE header per CEZIH Simplifier spec: alg + kid + jwk + x5c.
+        // x5c provides the cert so the verifier can find our public key.
+        info!("JWS: cert DER={} bytes, pub_key={} bytes", cert_der.len(), pub_key_data.len());
 
-        let jose_header = format!(r#"{{"alg":"{}","kid":"{}"}}"#, algorithm, kid);
-        info!("SIG: JOSE header: {}", jose_header);
+        let jose_header = if pub_key_data.len() > 1 && pub_key_data[0] == 0x04 {
+            // EC key: extract x, y coordinates from uncompressed point (0x04 || x || y)
+            let coord_size = (pub_key_data.len() - 1) / 2;
+            let x_b64url = b64url.encode(&pub_key_data[1..1 + coord_size]);
+            let y_b64url = b64url.encode(&pub_key_data[1 + coord_size..]);
+            let crv = match coord_size {
+                32 => "P-256",
+                48 => "P-384",
+                66 => "P-521",
+                _ => "P-384",
+            };
+            format!(
+                r#"{{"alg":"{}","kid":"{}","jwk":{{"crv":"{}","kty":"EC","x":"{}","y":"{}"}},"x5c":["{}"]}}"#,
+                algorithm, kid, crv, x_b64url, y_b64url, cert_b64
+            )
+        } else {
+            // RSA or unknown: include x5c for cert discovery
+            format!(r#"{{"alg":"{}","kid":"{}","x5c":["{}"]}}"#, algorithm, kid, cert_b64)
+        };
+        info!("JWS: JOSE header {} bytes", jose_header.len());
 
-        // Signing input: hash(jose_raw_bytes + bundle_raw_bytes)
-        // This matches the CEZIH example: raw byte concatenation, not JWS format.
+        // Standard JWS signing input (RFC 7515):
+        //   base64url(header) + "." + base64url(payload)
+        let header_b64url = b64url.encode(jose_header.as_bytes());
+        let payload_b64url = b64url.encode(bundle_json);
+        let signing_input = format!("{}.{}", header_b64url, payload_b64url);
+
         let hash_bytes: Vec<u8> = match algorithm {
             "ES384" => {
                 let mut h = Sha384::new();
-                h.update(jose_header.as_bytes());
-                h.update(bundle_json);
+                h.update(signing_input.as_bytes());
                 h.finalize().to_vec()
             }
             _ => {
                 let mut h = Sha256::new();
-                h.update(jose_header.as_bytes());
-                h.update(bundle_json);
+                h.update(signing_input.as_bytes());
                 h.finalize().to_vec()
             }
         };
 
-        info!("SIG: hash(jose {} + bundle {}) = {} bytes ({})",
-              jose_header.len(), bundle_json.len(), hash_bytes.len(), algorithm);
+        info!("JWS: signing_input={} chars, hash={} bytes ({})",
+              signing_input.len(), hash_bytes.len(), algorithm);
 
         // Sign the hash
         let mut sig_buf = vec![0u8; sig_len as usize];
@@ -184,14 +204,14 @@ unsafe fn sign_for_jws_inner(bundle_json: &[u8]) -> Result<JwsSignResult, String
         if must_free != 0 { NCryptFreeObject(key_handle); }
 
         if status != 0 {
-            warn!("SIG: NCryptSignHash failed for {}: 0x{:08x}", cert_label, status as u32);
+            warn!("JWS: NCryptSignHash failed for {}: 0x{:08x}", cert_label, status as u32);
             continue;
         }
 
         sig_buf.truncate(actual_len as usize);
-        info!("SIG: raw signature {} bytes", sig_buf.len());
+        info!("JWS: raw signature {} bytes", sig_buf.len());
 
-        // Self-verify against same hash
+        // Self-verify against same signing input
         {
             let mut pub_key_handle: *mut core::ffi::c_void = ptr::null_mut();
             let import_ok = CryptImportPublicKeyInfoEx2(
@@ -212,26 +232,25 @@ unsafe fn sign_for_jws_inner(bundle_json: &[u8]) -> Result<JwsSignResult, String
                     0,
                 );
                 if verify_status == 0 {
-                    info!("SIG: SELF-VERIFICATION PASSED");
+                    info!("JWS: SELF-VERIFICATION PASSED");
                 } else {
-                    warn!("SIG: SELF-VERIFICATION FAILED: 0x{:08x}", verify_status as u32);
+                    warn!("JWS: SELF-VERIFICATION FAILED: 0x{:08x}", verify_status as u32);
                 }
                 BCryptDestroyKey(pub_key_handle);
             } else {
-                warn!("SIG: Could not import public key for self-verification");
+                warn!("JWS: Could not import public key for self-verification");
             }
         }
 
-        // Output: base64(jose_raw + bundle_raw + sig_raw) — SINGLE base64.
-        // Matches CEZIH example format exactly: raw byte concat, one base64 layer.
-        let mut combined = Vec::with_capacity(jose_header.len() + bundle_json.len() + sig_buf.len());
-        combined.extend_from_slice(jose_header.as_bytes());
-        combined.extend_from_slice(bundle_json);
-        combined.extend_from_slice(&sig_buf);
-        let jws_base64 = b64std.encode(&combined);
+        // JWS compact serialization (RFC 7515): header.payload.signature
+        let sig_b64url = b64url.encode(&sig_buf);
+        let jws_compact = format!("{}.{}.{}", header_b64url, payload_b64url, sig_b64url);
 
-        info!("SIG: complete! base64(jose {} + bundle {} + sig {}) = {} chars",
-              jose_header.len(), bundle_json.len(), sig_buf.len(), jws_base64.len());
+        // Double base64: base64(JWS_compact) — FHIR base64Binary compatible.
+        let jws_base64 = b64std.encode(jws_compact.as_bytes());
+
+        info!("JWS: complete! alg={}, jws_compact={} chars, double_b64={} chars",
+              algorithm, jws_compact.len(), jws_base64.len());
 
         // Cleanup
         for (ctx, _) in &certs {

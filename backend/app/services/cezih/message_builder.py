@@ -170,9 +170,9 @@ async def add_signature(
         "data": "",
     }
 
-    # Compact JSON, insertion-order keys (NOT JCS sorted).
-    # Matches CEZIH example format: compact but not canonicalized.
-    bundle_json_bytes = json.dumps(bundle, ensure_ascii=False, separators=(',', ':')).encode("utf-8")
+    # JCS-canonicalize the bundle (RFC 8785): sorted keys + compact JSON.
+    # data="" is included in signed content — verifier does the same.
+    bundle_json_bytes = json.dumps(bundle, ensure_ascii=False, separators=(',', ':'), sort_keys=True).encode("utf-8")
 
     if sign_fn:
         result = await sign_fn(bundle_json_bytes)
