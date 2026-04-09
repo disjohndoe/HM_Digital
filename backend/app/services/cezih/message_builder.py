@@ -145,19 +145,19 @@ async def add_signature(
 ) -> dict[str, Any]:
     """Add a digital signature to the Bundle.
 
-    Uses standard JWS compact serialization (RFC 7515) with sigFormat indicator.
-    signature.data = base64url(header).base64url(payload).base64url(signature)
-    sigFormat = "application/jose" tells HAPI to accept dots in base64Binary.
+    Uses CEZIH's custom format:
+    signature.data = base64(JOSE_header_JSON + Bundle_JSON + raw_signature_bytes)
 
     Flow:
     1. Add signature object with data="" to the bundle
-    2. Serialize the bundle (this is what gets signed)
-    3. Send to agent → agent builds JOSE header, signs, returns JWS compact
-    4. Set bundle.signature.data to the JWS string
+    2. Serialize the bundle (this is what gets signed — raw JSON bytes)
+    3. Send to agent → agent builds JOSE header, hashes raw bundle, signs, assembles
+    4. Set bundle.signature.data to the base64 string
     """
     from app.services.cezih_signing import sign_bundle_for_cezih
 
     # Add signature structure with empty data (this is included in what gets signed)
+    # No sigFormat/targetFormat — CEZIH examples don't use them
     bundle["signature"] = {
         "type": [
             {
@@ -167,8 +167,6 @@ async def add_signature(
         ],
         "when": _now_iso(),
         "who": practitioner_ref(practitioner_id),
-        "sigFormat": "application/jose",
-        "targetFormat": "application/fhir+json",
         "data": "",
     }
 

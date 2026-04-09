@@ -352,17 +352,15 @@ async def sign_bundle_for_cezih(
 ) -> dict:
     """Sign a FHIR Bundle for CEZIH using the agent's smart card.
 
-    Uses standard JWS compact serialization (RFC 7515):
-      signature.data = base64url(header).base64url(payload).base64url(signature)
+    Uses CEZIH's custom format:
+      signature.data = base64(JOSE_header_JSON + Bundle_JSON + raw_signature_bytes)
 
     Where:
-      - header: {"kid":"<thumbprint>","alg":"<ES384|RS256>"}
-      - payload: compact JSON of the Bundle with signature.data = ""
+      - header: {"kid":"<thumbprint>","alg":"<ES384|RS256>"} (metadata only)
+      - Bundle JSON: compact JSON with signature.data = "" (this is what gets hashed)
       - signature: NCryptSignHash output (ECDSA r||s or RSA PKCS1)
 
-    Signing input (RFC 7515):
-      base64url(header) + "." + base64url(payload)
-    The sigFormat field in Bundle.signature is set to "application/jose".
+    Signing input: SHA hash of the raw Bundle JSON bytes directly.
     """
     if not _should_use_agent():
         raise CezihSigningError("Neispravna CEZIH konekcija — agent nije spojen")
@@ -375,8 +373,8 @@ async def sign_bundle_for_cezih(
     # The agent receives the bundle JSON and internally:
     # 1. Finds the cert → gets kid, algorithm
     # 2. Builds JOSE header: {"kid":"<thumbprint>","alg":"<alg>"}
-    # 3. Signing input = base64url(header) + "." + base64url(bundle) (standard JWS)
-    # 4. Signs SHA-384/256 hash via NCryptSignHash
+    # 3. Hashes the raw Bundle JSON bytes directly (NOT JWS base64url input)
+    # 4. Signs hash via NCryptSignHash
     # 5. Assembles: base64(header_json + bundle_json + raw_sig) (CEZIH format)
     # 6. Returns the base64 string ready for signature.data
     data_b64 = base64.b64encode(bundle_json_bytes).decode("ascii")
