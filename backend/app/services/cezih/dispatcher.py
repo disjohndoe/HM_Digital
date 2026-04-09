@@ -776,15 +776,10 @@ async def dispatch_create_visit(
             vrsta_posjete=vrsta_posjete, tip_posjete=tip_posjete,
             reason=reason, practitioner_id=practitioner_id, org_code=org_code or "",
         )
-        bundle_profile = ENCOUNTER_EVENT_PROFILE_MAP.get("1.1")
-        profile_urls = {
-            "bundle": bundle_profile,
-            "header": PROFILE_ENCOUNTER_MSG_HEADER,
-            "resource": PROFILE_ENCOUNTER,
-        } if bundle_profile else None
+        # NOTE: official CEZIH examples have NO meta.profile on any resource
         bundle = await build_message_bundle(
             "1.1", encounter, sender_org_code=org_code, author_practitioner_id=practitioner_id,
-            source_oid=source_oid, profile_urls=profile_urls,
+            source_oid=source_oid, profile_urls=None,
         )
         bundle = await add_signature(bundle, practitioner_id, http_client=http_client)
         result = await fhir_client.process_message("encounter-services/api/v1", bundle)

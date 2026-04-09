@@ -102,15 +102,17 @@ async def build_message_bundle(
             "system": MESSAGE_TYPE_SYSTEM,
             "code": event_code,
         },
-        "source": {"endpoint": f"urn:oid:{source_oid}" if source_oid else "urn:oid:0.0.0.0"},
-        "focus": [{"reference": f"urn:uuid:{resource_uuid}"}],
     }
 
+    # Field order matches official CEZIH example: sender, author, source, focus
     if sender_org_code:
         message_header["sender"] = org_ref(sender_org_code)
 
     if author_practitioner_id:
         message_header["author"] = practitioner_ref(author_practitioner_id)
+
+    message_header["source"] = {"endpoint": f"urn:oid:{source_oid}" if source_oid else "urn:oid:0.0.0.0"}
+    message_header["focus"] = [{"reference": f"urn:uuid:{resource_uuid}"}]
 
     bundle: dict[str, Any] = {
         "resourceType": "Bundle",
@@ -260,6 +262,7 @@ def build_encounter_create(
     Uses CEZIH Croatian CodeSystems:
       - Encounter.class: nacin-prijema (method of admission)
     """
+    # Match official CEZIH example exactly — NO type field, field order matches spec
     encounter: dict[str, Any] = {
         "resourceType": "Encounter",
         "extension": [
@@ -277,27 +280,15 @@ def build_encounter_create(
             "code": nacin_prijema,
             "display": NACIN_PRIJEMA_MAP.get(nacin_prijema, nacin_prijema),
         },
-        "type": [],
         "subject": patient_ref(patient_mbo),
-        "period": {"start": _now_iso()},
     }
-    # Encounter.type slices per hr-encounter profile (cezih.osnova 0.2.3)
-    if vrsta_posjete:
-        encounter["type"].append({
-            "coding": [{"system": CS_VRSTA_POSJETE, "code": vrsta_posjete}],
-        })
-    if tip_posjete:
-        encounter["type"].append({
-            "coding": [{"system": CS_TIP_POSJETE, "code": tip_posjete}],
-        })
-    if not encounter["type"]:
-        del encounter["type"]
-    if org_code:
-        encounter["serviceProvider"] = org_ref(org_code)
     if practitioner_id:
         encounter["participant"] = [{
             "individual": practitioner_ref(practitioner_id),
         }]
+    encounter["period"] = {"start": _now_iso()}
+    if org_code:
+        encounter["serviceProvider"] = org_ref(org_code)
     if reason:
         encounter["reasonCode"] = [{"text": reason}]
     return encounter
