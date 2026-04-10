@@ -94,6 +94,9 @@ export function VisitManagement({ patientId, patientMbo, onNavigateToCase }: Vis
   const updateVisit = useUpdateVisit()
   const visitAction = useVisitAction()
 
+  // Local cache for vrsta/tip posjete (CEZIH QEDm doesn't return Encounter.type)
+  const [visitMeta, setVisitMeta] = useState<Record<string, { nacin_prijema?: string; vrsta_posjete?: string; tip_posjete?: string }>>({})
+
   // Create form state
   const [showCreate, setShowCreate] = useState(false)
   const [nacinPrijema, setNacinPrijema] = useState("6")
@@ -139,6 +142,16 @@ export function VisitManagement({ patientId, patientMbo, onNavigateToCase }: Vis
       {
         onSuccess: (res) => {
           toast.success(`Posjeta kreirana: ${res.visit_id}`)
+          if (res.visit_id) {
+            setVisitMeta((prev) => ({
+              ...prev,
+              [res.visit_id]: {
+                nacin_prijema: res.nacin_prijema || nacinPrijema,
+                vrsta_posjete: res.vrsta_posjete || vrstaPosjete,
+                tip_posjete: res.tip_posjete || tipPosjete,
+              },
+            }))
+          }
           setShowCreate(false)
           setReason("")
         },
@@ -175,8 +188,18 @@ export function VisitManagement({ patientId, patientMbo, onNavigateToCase }: Vis
         patientMbo,
       },
       {
-        onSuccess: () => {
+        onSuccess: (res) => {
           toast.success("Posjeta ažurirana")
+          if (visitId) {
+            setVisitMeta((prev) => ({
+              ...prev,
+              [visitId]: {
+                nacin_prijema: res.nacin_prijema || editNacinPrijema,
+                vrsta_posjete: res.vrsta_posjete || editVrstaPosjete,
+                tip_posjete: res.tip_posjete || editTipPosjete,
+              },
+            }))
+          }
           cancelEdit()
         },
         onError: (err) => toast.error(err.message),
@@ -349,13 +372,19 @@ export function VisitManagement({ patientId, patientMbo, onNavigateToCase }: Vis
                           </Badge>
                         </TableCell>
                         <TableCell className="text-sm">
-                          {v.visit_type_display || NACIN_PRIJEMA_LABELS[v.visit_type] || v.visit_type}
+                          {v.visit_type_display
+                            || NACIN_PRIJEMA_LABELS[v.visit_type || visitMeta[v.visit_id]?.nacin_prijema || ""]
+                            || v.visit_type || "—"}
                         </TableCell>
                         <TableCell className="text-sm">
-                          {v.vrsta_posjete_display || VRSTA_POSJETE_LABELS[v.vrsta_posjete] || v.vrsta_posjete || "—"}
+                          {v.vrsta_posjete_display
+                            || VRSTA_POSJETE_LABELS[v.vrsta_posjete || visitMeta[v.visit_id]?.vrsta_posjete || ""]
+                            || "—"}
                         </TableCell>
                         <TableCell className="text-sm">
-                          {v.tip_posjete_display || TIP_POSJETE_LABELS[v.tip_posjete] || v.tip_posjete || "—"}
+                          {v.tip_posjete_display
+                            || TIP_POSJETE_LABELS[v.tip_posjete || visitMeta[v.visit_id]?.tip_posjete || ""]
+                            || "—"}
                         </TableCell>
                         <TableCell className="text-sm text-muted-foreground">
                           <div>

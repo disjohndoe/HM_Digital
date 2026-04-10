@@ -790,6 +790,9 @@ export interface VisitResponse {
   success: boolean;
   visit_id: string;
   status: string;
+  nacin_prijema?: string;
+  vrsta_posjete?: string;
+  tip_posjete?: string;
 }
 
 export interface CreateVisitRequest {

@@ -892,7 +892,11 @@ async def dispatch_create_visit(
         db, tenant_id, user_id, action="visit_create",
         details={"mbo": patient_mbo, "nacin_prijema": nacin_prijema},
     )
-    return _parse_visit_response(result)
+    resp = _parse_visit_response(result)
+    resp["nacin_prijema"] = nacin_prijema
+    resp["vrsta_posjete"] = vrsta_posjete
+    resp["tip_posjete"] = tip_posjete
+    return resp
 
 
 def _parse_visit_response(result: dict) -> dict:
@@ -969,7 +973,14 @@ async def dispatch_update_visit(
         db, tenant_id, user_id, action="visit_update",
         details={"visit_id": visit_id},
     )
-    return _parse_visit_response(result)
+    resp = _parse_visit_response(result)
+    if nacin_prijema:
+        resp["nacin_prijema"] = nacin_prijema
+    if vrsta_posjete:
+        resp["vrsta_posjete"] = vrsta_posjete
+    if tip_posjete:
+        resp["tip_posjete"] = tip_posjete
+    return resp
 
 
 async def dispatch_visit_action(
