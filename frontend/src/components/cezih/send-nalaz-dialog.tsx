@@ -49,25 +49,27 @@ export function SendNalazDialog({ open, onOpenChange, patientId, patientMbo }: S
   const { tipLabelMap, tipColorMap, isCezihMandatory } = useRecordTypeMaps()
 
   // Load patient visits and cases for linking
+  // API returns list of dicts: {visit_id, status, period_start, visit_type_display, ...}
   const { data: visitsData } = useListVisits(patientMbo || "")
   const { data: casesData } = useRetrieveCases(patientMbo || "")
 
-  const visits = (visitsData as { encounters?: { id?: string; status?: string; period?: { start?: string } }[] })?.encounters ?? []
-  const cases = (casesData as { conditions?: { id?: string; code?: { text?: string }; clinicalStatus?: { coding?: { code?: string }[] } }[] })?.conditions ?? []
+  type VisitItem = { visit_id: string; status: string; period_start?: string; visit_type_display?: string; service_provider_code?: string | null }
+  type CaseItem = { case_id: string; clinical_status: string; icd_code?: string; icd_display?: string }
 
-  // Filter to our active/in-progress visits and active cases
-  const activeVisits = visits.filter((v: { status?: string }) => v.status === "in-progress")
-  const activeCases = cases.filter((c: { clinicalStatus?: { coding?: { code?: string }[] } }) =>
-    c.clinicalStatus?.coding?.[0]?.code === "active"
-  )
+  const visits = (visitsData ?? []) as VisitItem[]
+  const cases = (casesData ?? []) as CaseItem[]
+
+  // Filter to active/in-progress visits and active cases
+  const activeVisits = visits.filter((v) => v.status === "in-progress")
+  const activeCases = cases.filter((c) => c.clinical_status === "active")
 
   // Auto-select first visit/case when data loads
   useEffect(() => {
     if (open && activeVisits.length > 0 && !selectedEncounterId) {
-      setSelectedEncounterId(activeVisits[0]?.id || "")
+      setSelectedEncounterId(activeVisits[0]?.visit_id || "")
     }
     if (open && activeCases.length > 0 && !selectedCaseId) {
-      setSelectedCaseId(activeCases[0]?.id || "")
+      setSelectedCaseId(activeCases[0]?.case_id || "")
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, activeVisits.length, activeCases.length])
@@ -182,9 +184,9 @@ export function SendNalazDialog({ open, onOpenChange, patientId, patientMbo }: S
                     disabled={sending}
                   >
                     <option value="">— Odaberi posjetu —</option>
-                    {activeVisits.map((v: { id?: string; period?: { start?: string } }) => (
-                      <option key={v.id} value={v.id || ""}>
-                        {v.period?.start ? formatDateHR(v.period.start) : v.id?.slice(0, 12)}
+                    {activeVisits.map((v) => (
+                      <option key={v.visit_id} value={v.visit_id}>
+                        {v.period_start ? formatDateHR(v.period_start) : v.visit_id.slice(0, 12)}
                       </option>
                     ))}
                   </select>
@@ -198,9 +200,9 @@ export function SendNalazDialog({ open, onOpenChange, patientId, patientMbo }: S
                     disabled={sending}
                   >
                     <option value="">— Odaberi slučaj —</option>
-                    {activeCases.map((c: { id?: string; code?: { text?: string } }) => (
-                      <option key={c.id} value={c.id || ""}>
-                        {c.code?.text || c.id?.slice(0, 12)}
+                    {activeCases.map((c) => (
+                      <option key={c.case_id} value={c.case_id}>
+                        {c.icd_code ? `${c.icd_code} ${c.icd_display || ""}`.trim() : c.case_id.slice(0, 12)}
                       </option>
                     ))}
                   </select>
