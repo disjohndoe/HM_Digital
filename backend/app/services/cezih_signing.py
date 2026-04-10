@@ -473,12 +473,12 @@ async def sign_bundle_via_extsigner(
 ) -> dict:
     """Sign a FHIR Bundle via CEZIH extsigner API (Certilia remote signing).
 
-    Sends the bundle to certws2:8443/services-router/gateway/extsigner/api/sign
-    via the agent (mTLS). CEZIH pushes a signing request to the user's Certilia
-    app on their phone. User approves → CEZIH returns the signed document.
+    Two-step flow:
+    1. POST /extsigner/api/sign → submit bundle, get transactionCode
+    2. GET /extsigner/api/getSignedDocuments?transactionCode=... → retrieve signed document
 
-    This bypasses local smart card signing entirely — CEZIH does the signing
-    with the Certilia cloud certificate.
+    The signing happens asynchronously — user approves on Certilia phone app.
+    We poll getSignedDocuments until the signed document is available.
     """
     if not _should_use_agent():
         raise CezihSigningError("Neispravna CEZIH konekcija — agent nije spojen")
@@ -493,7 +493,9 @@ async def sign_bundle_via_extsigner(
     if not base_url:
         raise CezihSigningError("CEZIH_FHIR_BASE_URL nije postavljen.")
 
-    url = f"{base_url.rstrip('/')}/services-router/gateway/extsigner/api/sign"
+    base = base_url.rstrip("/")
+    sign_url = f"{base}/services-router/gateway/extsigner/api/sign"
+    retrieve_url = f"{base}/services-router/gateway/extsigner/api/getSignedDocuments"
 
     import uuid as _uuid
     request_id = str(_uuid.uuid4())
@@ -516,28 +518,97 @@ async def sign_bundle_via_extsigner(
         ],
     }
 
+    # Step 1: Submit document for signing
     logger.info(
-        "CEZIH extsigner: signing via Certilia (OIB=%.6s..., url=%s, bundle=%d bytes)",
-        signer_oib, url, len(bundle_json_bytes),
+        "CEZIH extsigner step 1: submitting for signing (OIB=%.6s..., bundle=%d bytes)",
+        signer_oib, len(bundle_json_bytes),
     )
 
-    result = await _request_via_agent(
+    sign_result = await _request_via_agent(
         method="POST",
-        url=url,
+        url=sign_url,
         headers={"Content-Type": "application/json", "Accept": "application/json"},
         form_data=None,
         json_body=payload,
-        timeout=120,  # Longer timeout — user needs to approve on phone
+        timeout=30,
     )
 
-    logger.info("CEZIH extsigner response: %s", json.dumps(result, ensure_ascii=False)[:2000])
+    transaction_code = sign_result.get("transactionCode", "")
+    if not transaction_code:
+        logger.error("Extsigner sign response missing transactionCode: %s", sign_result)
+        raise CezihSigningError(f"Extsigner nije vratio transactionCode: {sign_result}")
 
-    return {
-        "success": True,
-        "method": "extsigner",
-        "response": result,
-        "signed_at": datetime.now(UTC).isoformat(),
-    }
+    logger.info(
+        "CEZIH extsigner step 1 OK: transactionCode=%.40s..., documents=%s",
+        transaction_code, sign_result.get("documents"),
+    )
+
+    # Step 2: Poll for signed document (user needs to approve on phone)
+    import urllib.parse
+    tc_encoded = urllib.parse.quote(transaction_code, safe="")
+    get_url = f"{retrieve_url}?transactionCode={tc_encoded}"
+
+    max_attempts = 24  # 24 x 5s = 120 seconds total
+    poll_interval = 5
+
+    for attempt in range(1, max_attempts + 1):
+        logger.info(
+            "CEZIH extsigner step 2: polling for signed document (attempt %d/%d)",
+            attempt, max_attempts,
+        )
+
+        try:
+            retrieve_result = await _request_via_agent(
+                method="GET",
+                url=get_url,
+                headers={"Accept": "application/json"},
+                form_data=None,
+                json_body=None,
+                timeout=30,
+            )
+        except CezihSigningError as e:
+            # If it's a 4xx error (not ready yet), keep polling
+            if "HTTP 404" in str(e) or "HTTP 202" in str(e):
+                logger.info("Extsigner: document not ready yet (attempt %d)", attempt)
+                await asyncio.sleep(poll_interval)
+                continue
+            raise
+
+        logger.info(
+            "CEZIH extsigner retrieve response: %s",
+            json.dumps(retrieve_result, ensure_ascii=False)[:2000],
+        )
+
+        # Check if we got signed documents back
+        status_code = retrieve_result.get("status_code", 0)
+        if status_code == 200 or "documents" in retrieve_result:
+            return {
+                "success": True,
+                "method": "extsigner",
+                "response": retrieve_result,
+                "transaction_code": transaction_code,
+                "signed_at": datetime.now(UTC).isoformat(),
+            }
+
+        # If still pending, wait and retry
+        if status_code in (202, 204):
+            logger.info("Extsigner: signing pending (HTTP %d), waiting...", status_code)
+            await asyncio.sleep(poll_interval)
+            continue
+
+        # Unknown status — return what we got for debugging
+        return {
+            "success": True,
+            "method": "extsigner",
+            "response": retrieve_result,
+            "transaction_code": transaction_code,
+            "signed_at": datetime.now(UTC).isoformat(),
+        }
+
+    raise CezihSigningError(
+        f"Potpis istekao — Certilia nije potvrdila potpis u {max_attempts * poll_interval}s. "
+        "Provjerite Certilia aplikaciju na mobitelu."
+    )
 
 
 async def check_extsigner_transaction(transaction_code: str) -> dict:

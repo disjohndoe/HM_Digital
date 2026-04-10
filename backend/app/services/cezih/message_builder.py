@@ -209,40 +209,40 @@ async def _add_signature_extsigner(
     result = await sign_bundle_via_extsigner(bundle_json_bytes, message_id=message_id)
 
     response = result.get("response", {})
-    transaction_code = response.get("transactionCode", "")
 
-    # Extsigner returns a transactionCode (async signing receipt).
-    # The document is signed AND submitted to CEZIH by the extsigner service.
-    # We store the transactionCode in signature.data as a reference.
-    if transaction_code:
-        bundle["signature"]["data"] = transaction_code
-        logger.info(
-            "Extsigner accepted document (transactionCode=%.40s..., documents=%s). "
-            "Document signed and submitted to CEZIH by extsigner.",
-            transaction_code, response.get("documents"),
-        )
-        return bundle
-
-    # Fallback: if response contains the signed document directly
+    # Try to extract signed document from retrieval response
     documents = response.get("documents")
-    if isinstance(documents, list) and documents and documents[0].get("base64Document"):
-        import base64 as _base64
-        signed_bundle_bytes = _base64.b64decode(documents[0]["base64Document"])
-        signed_bundle = json.loads(signed_bundle_bytes)
-        logger.info("Extsigner returned signed bundle directly")
-        return signed_bundle
 
-    # Fallback: if extsigner returns signature separately
+    # Case 1: documents is a list with signed bundles
+    if isinstance(documents, list) and documents:
+        doc = documents[0]
+        if isinstance(doc, dict) and doc.get("base64Document"):
+            import base64 as _base64
+            signed_bundle_bytes = _base64.b64decode(doc["base64Document"])
+            signed_bundle = json.loads(signed_bundle_bytes)
+            logger.info("Extsigner returned signed bundle — using CEZIH-signed document")
+            return signed_bundle
+        if isinstance(doc, dict) and doc.get("signature"):
+            bundle["signature"]["data"] = doc["signature"]
+            logger.info("Extsigner returned signature in document object")
+            return bundle
+
+    # Case 2: signature at top level
     signature_data = response.get("signature", response.get("signatureData", ""))
     if signature_data:
         bundle["signature"]["data"] = signature_data
         logger.info("Extsigner returned signature value — applied to bundle")
         return bundle
 
+    # Case 3: log the full response for debugging and raise
+    logger.warning(
+        "Extsigner response format unknown — raw: %s",
+        json.dumps(response, ensure_ascii=False)[:2000],
+    )
     from app.services.cezih.exceptions import CezihSigningError
     raise CezihSigningError(
         f"Extsigner returned unexpected response format. "
-        f"Keys: {list(response.keys())}."
+        f"Keys: {list(response.keys())}. Check backend logs."
     )
 
 
