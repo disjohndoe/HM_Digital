@@ -28,7 +28,8 @@ SIGNATURE_TYPE_CODE = "1.2.840.10065.1.12.1.1"  # Author's signature
 ID_MBO = "http://fhir.cezih.hr/specifikacije/identifikatori/MBO"
 ID_ORG = "http://fhir.cezih.hr/specifikacije/identifikatori/HZZO-sifra-zdravstvene-organizacije"
 ID_PRACTITIONER = "http://fhir.cezih.hr/specifikacije/identifikatori/HZJZ-broj-zdravstvenog-djelatnika"
-ID_CASE_GLOBAL = "http://fhir.cezih.hr/specifikacije/identifikatori/slucaj"
+ID_CASE_GLOBAL = "http://fhir.cezih.hr/specifikacije/identifikatori/identifikator-slucaja"
+ID_CASE_REF = "http://fhir.cezih.hr/specifikacije/identifikatori/slucaj"  # Used in Encounter.diagnosis
 ID_CASE_LOCAL = "http://fhir.cezih.hr/specifikacije/identifikatori/lokalni-identifikator-slucaja"
 ID_ENCOUNTER = "http://fhir.cezih.hr/specifikacije/identifikatori/identifikator-posjete"
 
@@ -599,7 +600,7 @@ def build_encounter_update(
         encounter["diagnosis"] = [{
             "condition": {
                 "type": "Condition",
-                "identifier": {"system": ID_CASE_GLOBAL, "value": diagnosis_case_id},
+                "identifier": {"system": ID_CASE_REF, "value": diagnosis_case_id},
             },
         }]
     return encounter
@@ -638,7 +639,7 @@ def build_encounter_close(
         encounter["diagnosis"] = [{
             "condition": {
                 "type": "Condition",
-                "identifier": {"system": ID_CASE_GLOBAL, "value": diagnosis_case_id},
+                "identifier": {"system": ID_CASE_REF, "value": diagnosis_case_id},
             },
         }]
     if not org_code:
@@ -680,7 +681,7 @@ def build_encounter_cancel(
         encounter["diagnosis"] = [{
             "condition": {
                 "type": "Condition",
-                "identifier": {"system": ID_CASE_GLOBAL, "value": diagnosis_case_id},
+                "identifier": {"system": ID_CASE_REF, "value": diagnosis_case_id},
             },
         }]
     return encounter
