@@ -128,11 +128,20 @@ export function useSendENalaz() {
     mutationFn: ({
       patient_id,
       record_id,
+      encounter_id,
+      case_id,
     }: {
       patient_id: string
       record_id: string
+      encounter_id?: string
+      case_id?: string
     }) =>
-      api.post<ENalazResponse>("/cezih/e-nalaz", { patient_id, record_id }),
+      api.post<ENalazResponse>("/cezih/e-nalaz", {
+        patient_id,
+        record_id,
+        encounter_id: encounter_id || "",
+        case_id: case_id || "",
+      }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["medical-records"] })
       queryClient.invalidateQueries({ queryKey: ["cezih", "activity"] })
@@ -350,8 +359,8 @@ export function useUpdateVisit() {
 export function useVisitAction() {
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: ({ visitId, action, patientMbo }: { visitId: string; action: string; patientMbo: string }) =>
-      api.post<VisitResponse>(`/cezih/visits/${visitId}/action?mbo=${encodeURIComponent(patientMbo)}`, { action }),
+    mutationFn: ({ visitId, action, patientMbo, periodStart }: { visitId: string; action: string; patientMbo: string; periodStart?: string | null }) =>
+      api.post<VisitResponse>(`/cezih/visits/${visitId}/action?mbo=${encodeURIComponent(patientMbo)}`, { action, period_start: periodStart || undefined }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["cezih", "visits"] })
       qc.invalidateQueries({ queryKey: ["cezih", "activity"] })

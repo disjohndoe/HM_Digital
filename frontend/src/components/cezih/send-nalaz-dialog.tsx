@@ -25,7 +25,7 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog"
 import { useMedicalRecords } from "@/lib/hooks/use-medical-records"
-import { useSendENalaz } from "@/lib/hooks/use-cezih"
+import { useSendENalaz, useListVisits, useRetrieveCases } from "@/lib/hooks/use-cezih"
 import { useRecordTypeMaps } from "@/lib/hooks/use-record-types"
 import { formatDateHR } from "@/lib/utils"
 
@@ -41,10 +41,36 @@ export function SendNalazDialog({ open, onOpenChange, patientId, patientMbo }: S
   const [sending, setSending] = useState(false)
   const [progress, setProgress] = useState({ current: 0, total: 0 })
   const [failedRecords, setFailedRecords] = useState<{ id: string; error: string }[]>([])
+  const [selectedEncounterId, setSelectedEncounterId] = useState("")
+  const [selectedCaseId, setSelectedCaseId] = useState("")
 
   const { data } = useMedicalRecords(patientId)
   const sendENalaz = useSendENalaz()
   const { tipLabelMap, tipColorMap, isCezihMandatory } = useRecordTypeMaps()
+
+  // Load patient visits and cases for linking
+  const { data: visitsData } = useListVisits(patientMbo || "")
+  const { data: casesData } = useRetrieveCases(patientMbo || "")
+
+  const visits = (visitsData as { encounters?: { id?: string; status?: string; period?: { start?: string } }[] })?.encounters ?? []
+  const cases = (casesData as { conditions?: { id?: string; code?: { text?: string }; clinicalStatus?: { coding?: { code?: string }[] } }[] })?.conditions ?? []
+
+  // Filter to our active/in-progress visits and active cases
+  const activeVisits = visits.filter((v: { status?: string }) => v.status === "in-progress")
+  const activeCases = cases.filter((c: { clinicalStatus?: { coding?: { code?: string }[] } }) =>
+    c.clinicalStatus?.coding?.[0]?.code === "active"
+  )
+
+  // Auto-select first visit/case when data loads
+  useEffect(() => {
+    if (open && activeVisits.length > 0 && !selectedEncounterId) {
+      setSelectedEncounterId(activeVisits[0]?.id || "")
+    }
+    if (open && activeCases.length > 0 && !selectedCaseId) {
+      setSelectedCaseId(activeCases[0]?.id || "")
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, activeVisits.length, activeCases.length])
 
   const records = data?.items ?? []
   const eligibleRecords = records.filter(
@@ -57,6 +83,8 @@ export function SendNalazDialog({ open, onOpenChange, patientId, patientMbo }: S
       setSelectedIds(new Set(eligibleRecords.map((r) => r.id)))
       setProgress({ current: 0, total: 0 })
       setFailedRecords([])
+      setSelectedEncounterId("")
+      setSelectedCaseId("")
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open])
@@ -94,6 +122,8 @@ export function SendNalazDialog({ open, onOpenChange, patientId, patientMbo }: S
         await sendENalaz.mutateAsync({
           patient_id: patientId,
           record_id: ids[i],
+          encounter_id: selectedEncounterId,
+          case_id: selectedCaseId,
         })
         successCount++
       } catch (err) {
@@ -121,7 +151,7 @@ export function SendNalazDialog({ open, onOpenChange, patientId, patientMbo }: S
       onOpenChange(false)
     }
     // Keep dialog open on partial failure so user can see which records failed
-  }, [selectedIds, patientId, sendENalaz, onOpenChange])
+  }, [selectedIds, patientId, sendENalaz, onOpenChange, selectedEncounterId, selectedCaseId])
 
   const allSelected = eligibleRecords.length > 0 && selectedIds.size === eligibleRecords.length
 
@@ -138,6 +168,56 @@ export function SendNalazDialog({ open, onOpenChange, patientId, patientMbo }: S
         </DialogHeader>
 
         <div className="space-y-3 py-2">
+          {/* Visit and Case selection (required by CEZIH) */}
+          {patientMbo && eligibleRecords.length > 0 && (
+            <div className="space-y-2 rounded-lg border bg-muted/30 p-3">
+              <p className="text-xs font-medium text-muted-foreground">CEZIH kontekst (obavezno)</p>
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="text-xs text-muted-foreground">Posjeta</label>
+                  <select
+                    value={selectedEncounterId}
+                    onChange={(e) => setSelectedEncounterId(e.target.value)}
+                    className="w-full rounded border bg-background px-2 py-1.5 text-xs"
+                    disabled={sending}
+                  >
+                    <option value="">— Odaberi posjetu —</option>
+                    {activeVisits.map((v: { id?: string; period?: { start?: string } }) => (
+                      <option key={v.id} value={v.id || ""}>
+                        {v.period?.start ? formatDateHR(v.period.start) : v.id?.slice(0, 12)}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="text-xs text-muted-foreground">Slučaj</label>
+                  <select
+                    value={selectedCaseId}
+                    onChange={(e) => setSelectedCaseId(e.target.value)}
+                    className="w-full rounded border bg-background px-2 py-1.5 text-xs"
+                    disabled={sending}
+                  >
+                    <option value="">— Odaberi slučaj —</option>
+                    {activeCases.map((c: { id?: string; code?: { text?: string } }) => (
+                      <option key={c.id} value={c.id || ""}>
+                        {c.code?.text || c.id?.slice(0, 12)}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+              {(!selectedEncounterId || !selectedCaseId) && (
+                <p className="text-xs text-amber-600">
+                  {!selectedEncounterId && !selectedCaseId
+                    ? "Potrebno je odabrati posjetu i slučaj"
+                    : !selectedEncounterId
+                      ? "Potrebno je odabrati posjetu"
+                      : "Potrebno je odabrati slučaj"}
+                </p>
+              )}
+            </div>
+          )}
+
           {eligibleRecords.length === 0 ? (
             <div className="flex flex-col items-center gap-2 rounded-lg border border-dashed py-8">
               <AlertTriangle className="h-5 w-5 text-muted-foreground" />
@@ -223,8 +303,8 @@ export function SendNalazDialog({ open, onOpenChange, patientId, patientMbo }: S
         <DialogFooter>
           <Button
             onClick={handleSend}
-            disabled={selectedIds.size === 0 || sending || !patientMbo}
-            title={!patientMbo ? "Pacijent nema MBO — potreban za CEZIH" : undefined}
+            disabled={selectedIds.size === 0 || sending || !patientMbo || !selectedEncounterId || !selectedCaseId}
+            title={!patientMbo ? "Pacijent nema MBO — potreban za CEZIH" : (!selectedEncounterId || !selectedCaseId) ? "Odaberite posjetu i slučaj" : undefined}
           >
             {sending ? (
               <Loader2 className="mr-2 h-4 w-4 animate-spin" />
