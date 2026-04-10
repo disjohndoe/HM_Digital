@@ -591,12 +591,12 @@ async def query_code_system(
 async def expand_value_set(
     client: httpx.AsyncClient, url: str, filter_text: str | None = None,
 ) -> dict:
-    """Expand a CEZIH value set (ITI-95 SVCM)."""
+    """Expand a CEZIH value set (ITI-95 SVCM $expand)."""
     fhir_client = CezihFhirClient(client)
-    params: dict = {"url": url}
+    params: dict = {"url": url, "_count": "100"}
     if filter_text:
         params["filter"] = filter_text
-    response = await fhir_client.get("terminology-services/api/v1/ValueSet", params=params)
+    response = await fhir_client.get("terminology-services/api/v1/ValueSet/$expand", params=params)
 
     concepts = []
     expansion = response.get("expansion", {})
