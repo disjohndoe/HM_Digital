@@ -209,10 +209,15 @@ def build_iti65_transaction_bundle(
         })
     submission_set["extension"] = extensions
 
+    # Pre-assign UUIDs to entries without _uuid to ensure consistency
+    for e in entries:
+        if "_uuid" not in e:
+            e["_uuid"] = str(uuid.uuid4())
+
     # SubmissionSet entry references only DocumentReference entries (NOT Binary)
     doc_ref_entries = [e for e in entries if e.get("resourceType") == "DocumentReference"]
-    doc_ref_uuids = [e.get("_uuid", str(uuid.uuid4())) for e in doc_ref_entries]
-    all_uuids = [e.get("_uuid", str(uuid.uuid4())) for e in entries]
+    doc_ref_uuids = [e["_uuid"] for e in doc_ref_entries]
+    all_uuids = [e["_uuid"] for e in entries]
     submission_set["entry"] = [
         {"item": {"reference": f"urn:uuid:{u}"}} for u in doc_ref_uuids
     ]
