@@ -164,12 +164,16 @@ async def send_enalaz(
 ):
     await check_cezih_access(db, current_user.tenant_id)
     org_code, source_oid = await _get_tenant_cezih_config(db, current_user.tenant_id)
+    practitioner_name = f"{current_user.ime} {current_user.prezime}".strip()
+
     return await cezih.send_enalaz(
         db, current_user.tenant_id, data.patient_id, data.record_id,
         user_id=current_user.id,
         http_client=_http_client(request),
         practitioner_id=current_user.practitioner_id or "",
         org_code=org_code, source_oid=source_oid,
+        encounter_id=data.encounter_id, case_id=data.case_id,
+        practitioner_name=practitioner_name,
     )
 
 
@@ -771,6 +775,7 @@ async def visit_action(
     org_code, source_oid = await _get_tenant_cezih_config(db, current_user.tenant_id)
     return await cezih.dispatch_visit_action(
         visit_id, data.action, mbo,
+        period_start=data.period_start,
         db=db, user_id=current_user.id, tenant_id=current_user.tenant_id,
         http_client=_http_client(request),
         practitioner_id=current_user.practitioner_id or "",

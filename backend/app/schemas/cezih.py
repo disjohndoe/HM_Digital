@@ -27,6 +27,8 @@ class InsuranceCheckResponse(BaseModel):
 class ENalazRequest(BaseModel):
     patient_id: UUID
     record_id: UUID
+    encounter_id: str = ""
+    case_id: str = ""
 
 
 class ENalazResponse(BaseModel):
@@ -265,6 +267,7 @@ class UpdateVisitRequest(BaseModel):
 
 class VisitActionRequest(BaseModel):
     action: str  # close, reopen, storno
+    period_start: str | None = None  # preserve original visit start time
 
 
 class VisitResponse(BaseModel):

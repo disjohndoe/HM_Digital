@@ -124,6 +124,9 @@ async def send_enalaz(
     practitioner_id: str | None = None,
     org_code: str = "",
     source_oid: str = "",
+    encounter_id: str = "",
+    case_id: str = "",
+    practitioner_name: str = "",
 ) -> dict:
     """Send clinical document / finding (ITI-65 MHD).
 
@@ -226,15 +229,18 @@ async def send_enalaz(
         "author": [],
     }
 
-    # Author: practitioner (HZJZ ID)
+    # Author: practitioner (HZJZ ID) — CEZIHDR-004 requires display (name)
     if practitioner_id:
-        doc_ref_dict["author"].append({
+        author_practitioner: dict = {
             "type": "Practitioner",
             "identifier": {
                 "system": "http://fhir.cezih.hr/specifikacije/identifikatori/HZJZ-broj-zdravstvenog-djelatnika",
                 "value": practitioner_id,
             },
-        })
+        }
+        if practitioner_name:
+            author_practitioner["display"] = practitioner_name
+        doc_ref_dict["author"].append(author_practitioner)
 
     # Author: organization (HZZO code)
     if org_code:
@@ -246,6 +252,16 @@ async def send_enalaz(
             },
         })
 
+    # Authenticator (CEZIHDR-001: odgovorna osoba)
+    if practitioner_id:
+        doc_ref_dict["authenticator"] = {
+            "type": "Practitioner",
+            "identifier": {
+                "system": "http://fhir.cezih.hr/specifikacije/identifikatori/HZJZ-broj-zdravstvenog-djelatnika",
+                "value": practitioner_id,
+            },
+        }
+
     # Custodian: organization
     if org_code:
         doc_ref_dict["custodian"] = {
@@ -254,6 +270,38 @@ async def send_enalaz(
                 "value": org_code,
             },
         }
+
+    # Context: encounter, case, period, practiceSetting (CEZIHDR-005/006/008/011)
+    context: dict = {
+        "period": {
+            "start": record_data.get("created_at", _now_iso()),
+            "end": _now_iso(),
+        },
+        "practiceSetting": {
+            "coding": [{
+                "system": "http://fhir.cezih.hr/specifikacije/CodeSystem/hr-tip-posjete",
+                "code": "2",
+                "display": "Posjeta SKZZ",
+            }]
+        },
+    }
+    if encounter_id:
+        context["encounter"] = [{
+            "type": "Encounter",
+            "identifier": {
+                "system": "http://fhir.cezih.hr/specifikacije/identifikatori/identifikator-posjete",
+                "value": encounter_id,
+            },
+        }]
+    if case_id:
+        context["related"] = [{
+            "type": "Condition",
+            "identifier": {
+                "system": "http://fhir.cezih.hr/specifikacije/identifikatori/identifikator-slucaja",
+                "value": case_id,
+            },
+        }]
+    doc_ref_dict["context"] = context
 
     # Include clinical content as attachment (FHIR MHD content element)
     if clinical_b64:

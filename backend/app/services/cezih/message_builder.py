@@ -192,11 +192,22 @@ def build_iti65_transaction_bundle(
     # List.source only accepts Practitioner/Patient/Device — NOT Organization
     if author_practitioner_id:
         submission_set["source"] = practitioner_ref(author_practitioner_id)
+    # Extensions: sourceId (required, min:1) + ihe-authorOrg
+    extensions: list[dict[str, Any]] = [
+        {
+            "url": "https://profiles.ihe.net/ITI/MHD/StructureDefinition/ihe-sourceId",
+            "valueIdentifier": {
+                "system": "urn:ietf:rfc:3986",
+                "value": f"urn:oid:{sender_org_code}" if sender_org_code else "urn:oid:2.16.840.1.113883.2.7",
+            },
+        },
+    ]
     if sender_org_code:
-        submission_set["extension"] = [{
+        extensions.append({
             "url": "https://profiles.ihe.net/ITI/MHD/StructureDefinition/ihe-authorOrg",
             "valueReference": org_ref(sender_org_code),
-        }]
+        })
+    submission_set["extension"] = extensions
 
     # SubmissionSet entry references all DocumentReference entries
     doc_ref_uuids = [e.get("_uuid", str(uuid.uuid4())) for e in entries]

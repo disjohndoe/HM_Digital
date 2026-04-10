@@ -202,6 +202,9 @@ async def send_enalaz(
     practitioner_id: str | None = None,
     org_code: str | None = None,
     source_oid: str | None = None,
+    encounter_id: str = "",
+    case_id: str = "",
+    practitioner_name: str = "",
 ) -> dict:
     from app.models.patient import Patient
     _require_audit_params(db, user_id, tenant_id)
@@ -246,11 +249,15 @@ async def send_enalaz(
             detail="HZJZ ID djelatnika nije postavljen. Potrebno je za CEZIH potpisivanje.",
         )
 
+    record_data["created_at"] = record.created_at.isoformat() if record.created_at else _now_iso()
+
     try:
         result = await real_service.send_enalaz(
             http_client, patient_data, record_data,
             practitioner_id=practitioner_id,
             org_code=org_code or "", source_oid=source_oid or "",
+            encounter_id=encounter_id, case_id=case_id,
+            practitioner_name=practitioner_name,
         )
     except CezihError as e:
         logger.error("CEZIH e-Nalaz send failed: %s", e.message)
@@ -989,6 +996,7 @@ async def dispatch_visit_action(
     patient_mbo: str,
     *,
     nacin_prijema: str = "6",
+    period_start: str | None = None,
     db: AsyncSession | None = None,
     user_id: UUID | None = None,
     tenant_id: UUID | None = None,
@@ -1040,6 +1048,7 @@ async def dispatch_visit_action(
                 nacin_prijema=nacin_prijema,
                 practitioner_id=practitioner_id,
                 org_code=org_code or "",
+                period_start=period_start,
             )
         bundle_profile = ENCOUNTER_EVENT_PROFILE_MAP.get(event_code)
         profile_urls = {
