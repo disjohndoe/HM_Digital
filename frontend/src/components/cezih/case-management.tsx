@@ -85,6 +85,8 @@ export function CaseManagement({ patientId, patientMbo }: CaseManagementProps) {
   const [selectedIcd, setSelectedIcd] = useState<{ code: string; display: string } | null>(null)
   const [onsetDate, setOnsetDate] = useState(new Date().toISOString().split("T")[0])
   const [note, setNote] = useState("")
+  const [manualCode, setManualCode] = useState("")
+  const [manualDisplay, setManualDisplay] = useState("")
 
   // Edit state
   const [editCaseId, setEditCaseId] = useState<string | null>(null)
@@ -234,6 +236,38 @@ export function CaseManagement({ patientId, patientMbo }: CaseManagementProps) {
                         <span className="text-muted-foreground">{item.display}</span>
                       </button>
                     ))}
+                  </div>
+                )}
+                {icdQuery.length >= 2 && !selectedIcd && icdSearch.data?.length === 0 && !icdSearch.isLoading && (
+                  <div className="mt-1 space-y-2">
+                    <p className="text-xs text-muted-foreground">Nema rezultata. Unesite ručno:</p>
+                    <div className="flex gap-2">
+                      <Input
+                        className="w-28"
+                        placeholder="Šifra (npr. J06.9)"
+                        value={manualCode}
+                        onChange={(e) => setManualCode(e.target.value.toUpperCase())}
+                      />
+                      <Input
+                        className="flex-1"
+                        placeholder="Naziv dijagnoze"
+                        value={manualDisplay}
+                        onChange={(e) => setManualDisplay(e.target.value)}
+                      />
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        disabled={!manualCode || !manualDisplay}
+                        onClick={() => {
+                          setSelectedIcd({ code: manualCode, display: manualDisplay })
+                          setIcdQuery(`${manualCode} — ${manualDisplay}`)
+                          setManualCode("")
+                          setManualDisplay("")
+                        }}
+                      >
+                        Potvrdi
+                      </Button>
+                    </div>
                   </div>
                 )}
                 {selectedIcd && (
