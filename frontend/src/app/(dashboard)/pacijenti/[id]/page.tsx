@@ -102,25 +102,7 @@ export default function PacijentDetailPage() {
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
             <Button
               size="lg"
-              variant={ekartonOpen ? "default" : "outline"}
-              className="h-12 text-base"
-              onClick={() => {
-                if (!ekartonOpen) {
-                  // Invalidate all cached eKarton data so everything refetches fresh
-                  queryClient.invalidateQueries({ queryKey: ["cezih", "patient", id] })
-                  queryClient.invalidateQueries({ queryKey: ["cezih", "visits"] })
-                  queryClient.invalidateQueries({ queryKey: ["cezih", "cases"] })
-                  queryClient.invalidateQueries({ queryKey: ["cezih", "documents"] })
-                }
-                setEkartonOpen((prev) => !prev)
-              }}
-            >
-              <FileText className="mr-2 h-5 w-5" />
-              {ekartonOpen ? "Sakrij e-Karton" : "Dohvati e-Karton"}
-            </Button>
-            <Button
-              size="lg"
-              className="h-12 text-base bg-violet-600 hover:bg-violet-700 text-white"
+              className="h-12 text-base bg-sky-500 hover:bg-sky-600 text-white"
               onClick={() => {
                 if (!patient.mbo) {
                   toast.error("Pacijent nema MBO — posjete nisu dostupne")
@@ -134,8 +116,23 @@ export default function PacijentDetailPage() {
             </Button>
             <Button
               size="lg"
-              variant="outline"
-              className="h-12 text-base"
+              className={`h-12 text-base ${ekartonOpen ? "bg-sky-600 hover:bg-sky-700" : "bg-sky-500 hover:bg-sky-600"} text-white`}
+              onClick={() => {
+                if (!ekartonOpen) {
+                  queryClient.invalidateQueries({ queryKey: ["cezih", "patient", id] })
+                  queryClient.invalidateQueries({ queryKey: ["cezih", "visits"] })
+                  queryClient.invalidateQueries({ queryKey: ["cezih", "cases"] })
+                  queryClient.invalidateQueries({ queryKey: ["cezih", "documents"] })
+                }
+                setEkartonOpen((prev) => !prev)
+              }}
+            >
+              <FileText className="mr-2 h-5 w-5" />
+              {ekartonOpen ? "Sakrij e-Karton" : "Dohvati e-Karton"}
+            </Button>
+            <Button
+              size="lg"
+              className="h-12 text-base bg-sky-500 hover:bg-sky-600 text-white"
               onClick={() => setNewRecordOpen(true)}
             >
               <PlusIcon className="mr-2 h-5 w-5" />
