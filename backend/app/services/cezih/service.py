@@ -184,7 +184,7 @@ async def send_enalaz(
             },
         )
         logger.info("OID generation response: %s", oid_result)
-        oids = oid_result.get("oids", [])
+        oids = oid_result.get("oid") or oid_result.get("oids") or []
         if oids:
             doc_oid = oids[0]
             logger.info("Generated document OID: %s", doc_oid)
