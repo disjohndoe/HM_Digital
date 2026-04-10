@@ -170,11 +170,18 @@ async def send_enalaz(
 
     # Generate document OID via CEZIH identifier registry (TC6)
     # masterIdentifier MUST be a valid OID — UUID format is rejected
+    # oidType is a Coding with system + code per CEZIH spec
     doc_oid = ""
     try:
         oid_result = await fhir_client.post(
             "identifier-registry-services/api/v1/oid/generateOIDBatch",
-            json_body={"oidType": "DOCUMENT", "quantity": 1},
+            json_body={
+                "oidType": {
+                    "system": "http://ent.hr/fhir/CodeSystem/ehe-oid-types",
+                    "code": "1",
+                },
+                "quantity": 1,
+            },
         )
         logger.info("OID generation response: %s", oid_result)
         oids = oid_result.get("oids", [])
