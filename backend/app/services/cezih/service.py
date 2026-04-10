@@ -283,7 +283,7 @@ async def send_enalaz(
         "practiceSetting": {
             "coding": [{
                 "system": "http://fhir.cezih.hr/specifikacije/CodeSystem/djelatnosti-zz",
-                "code": "0500",
+                "code": "2011001",
                 "display": "Interna medicina",
             }]
         },

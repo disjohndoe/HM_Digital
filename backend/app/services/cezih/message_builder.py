@@ -209,8 +209,10 @@ def build_iti65_transaction_bundle(
         })
     submission_set["extension"] = extensions
 
-    # SubmissionSet entry references all DocumentReference entries
-    doc_ref_uuids = [e.get("_uuid", str(uuid.uuid4())) for e in entries]
+    # SubmissionSet entry references only DocumentReference entries (NOT Binary)
+    doc_ref_entries = [e for e in entries if e.get("resourceType") == "DocumentReference"]
+    doc_ref_uuids = [e.get("_uuid", str(uuid.uuid4())) for e in doc_ref_entries]
+    all_uuids = [e.get("_uuid", str(uuid.uuid4())) for e in entries]
     submission_set["entry"] = [
         {"item": {"reference": f"urn:uuid:{u}"}} for u in doc_ref_uuids
     ]
@@ -224,7 +226,7 @@ def build_iti65_transaction_bundle(
     ]
 
     for i, entry_resource in enumerate(entries):
-        entry_uuid = doc_ref_uuids[i]
+        entry_uuid = all_uuids[i]
         # Remove internal _uuid marker if present
         resource = {k: v for k, v in entry_resource.items() if k != "_uuid"}
         resource_type = resource.get("resourceType", "DocumentReference")
