@@ -165,8 +165,16 @@ class CezihFhirClient:
                         status_code=status_code,
                         operation_outcome=oo,
                     )
+            # Build a concise error — don't dump entire FHIR bundles into user-facing messages
+            error_detail = ""
+            if body.get("error"):
+                error_detail = str(body["error"])[:500]
+            elif body.get("resourceType") == "Bundle":
+                error_detail = "CEZIH odbio zahtjev (nema OperationOutcome u odgovoru)"
+            else:
+                error_detail = body_text[:500]
             raise CezihFhirError(
-                f"CEZIH HTTP {status_code}: {body_text[:2000]}",
+                f"CEZIH HTTP {status_code}: {error_detail}",
                 status_code=status_code,
             )
 
