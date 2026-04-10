@@ -10,6 +10,9 @@ git pull origin main
 echo "=== Tagging current images for rollback ==="
 docker compose images -q 2>/dev/null | xargs -r docker tag 2>/dev/null || true
 
+echo "=== Cleaning stale containers ==="
+docker compose down --remove-orphans 2>/dev/null || true
+
 echo "=== Building and restarting containers ==="
 docker compose build
 docker compose up -d
