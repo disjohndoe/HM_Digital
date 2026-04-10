@@ -565,7 +565,9 @@ async def query_code_system(
 ) -> list[dict]:
     """Query a CEZIH code system (ITI-96 SVCM)."""
     fhir_client = CezihFhirClient(client)
-    params = {"name": system_name, "filter": query, "_count": str(count)}
+    params: dict = {"name:contains": system_name, "_count": str(count)}
+    if query:
+        params["title:contains"] = query
     response = await fhir_client.get("terminology-services/api/v1/CodeSystem", params=params)
 
     results = []
