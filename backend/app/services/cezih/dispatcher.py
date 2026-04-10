@@ -874,7 +874,27 @@ async def dispatch_create_visit(
         db, tenant_id, user_id, action="visit_create",
         details={"mbo": patient_mbo, "nacin_prijema": nacin_prijema},
     )
-    return result
+    return _parse_visit_response(result)
+
+
+def _parse_visit_response(result: dict) -> dict:
+    """Parse CEZIH FHIR Bundle response into VisitResponse format."""
+    # Extract Encounter from response Bundle entries
+    visit_id = ""
+    encounter_status = "in-progress"
+    for entry in result.get("entry", []):
+        resource = entry.get("resource", {})
+        if resource.get("resourceType") == "Encounter":
+            visit_id = resource.get("id", "")
+            encounter_status = resource.get("status", "in-progress")
+            break
+        if resource.get("resourceType") == "MessageHeader":
+            # Encounter ID from focus reference (e.g. "http://fhir.cezih.hr/fhir/Encounter/1469")
+            for focus in resource.get("focus", []):
+                ref = focus.get("reference", "")
+                if "Encounter" in ref:
+                    visit_id = ref.rsplit("/", 1)[-1]
+    return {"success": True, "visit_id": visit_id, "status": encounter_status}
 
 
 async def dispatch_update_visit(
@@ -926,7 +946,7 @@ async def dispatch_update_visit(
         db, tenant_id, user_id, action="visit_update",
         details={"visit_id": visit_id},
     )
-    return result
+    return _parse_visit_response(result)
 
 
 async def dispatch_visit_action(
@@ -1006,7 +1026,7 @@ async def dispatch_visit_action(
         db, tenant_id, user_id, action=f"visit_{action}",
         details={"visit_id": visit_id, "action": action},
     )
-    return result
+    return _parse_visit_response(result)
 
 
 async def dispatch_list_visits(
