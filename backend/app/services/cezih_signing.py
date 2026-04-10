@@ -504,13 +504,23 @@ async def sign_bundle_via_extsigner(
     # Encode bundle as base64
     bundle_b64 = base64.b64encode(bundle_json_bytes).decode("ascii")
 
+    # Detect bundle type: transaction bundles (ITI-65) use FHIR_DOCUMENT,
+    # message bundles (visits/cases) use FHIR_MESSAGE
+    import json as _json_detect
+    try:
+        bundle_obj = _json_detect.loads(bundle_json_bytes)
+        bundle_type = bundle_obj.get("type", "message")
+    except Exception:
+        bundle_type = "message"
+    doc_type = "FHIR_DOCUMENT" if bundle_type == "transaction" else "FHIR_MESSAGE"
+
     payload = {
         "oib": signer_oib,
         "sourceSystem": "HM-DIGITAL-MEDICAL",
         "requestId": request_id,
         "documents": [
             {
-                "documentType": "FHIR_MESSAGE",
+                "documentType": doc_type,
                 "mimeType": "JSON",
                 "base64Document": bundle_b64,
                 "messageId": msg_id,
