@@ -252,7 +252,7 @@ async def send_enalaz(
             },
         })
 
-    # Authenticator (CEZIHDR-001: odgovorna osoba)
+    # Authenticator (CEZIHDR-001: odgovorna osoba) — display required (min:1)
     if practitioner_id:
         doc_ref_dict["authenticator"] = {
             "type": "Practitioner",
@@ -260,18 +260,21 @@ async def send_enalaz(
                 "system": "http://fhir.cezih.hr/specifikacije/identifikatori/HZJZ-broj-zdravstvenog-djelatnika",
                 "value": practitioner_id,
             },
+            "display": practitioner_name or practitioner_id,
         }
 
-    # Custodian: organization
+    # Custodian: organization — display required (min:1)
     if org_code:
         doc_ref_dict["custodian"] = {
             "identifier": {
                 "system": "http://fhir.cezih.hr/specifikacije/identifikatori/HZZO-sifra-zdravstvene-organizacije",
                 "value": org_code,
             },
+            "display": f"Ustanova {org_code}",
         }
 
     # Context: encounter, case, period, practiceSetting (CEZIHDR-005/006/008/011)
+    # practiceSetting must use djelatnosti-zz ValueSet (NOT hr-tip-posjete)
     context: dict = {
         "period": {
             "start": record_data.get("created_at", _now_iso()),
@@ -279,9 +282,9 @@ async def send_enalaz(
         },
         "practiceSetting": {
             "coding": [{
-                "system": "http://fhir.cezih.hr/specifikacije/CodeSystem/hr-tip-posjete",
-                "code": "2",
-                "display": "Posjeta SKZZ",
+                "system": "http://fhir.cezih.hr/specifikacije/CodeSystem/djelatnosti-zz",
+                "code": "0500",
+                "display": "Interna medicina",
             }]
         },
     }
@@ -303,20 +306,48 @@ async def send_enalaz(
         }]
     doc_ref_dict["context"] = context
 
-    # Include clinical content as attachment (FHIR MHD content element)
+    # Content: Binary resource referenced via URL (inline data is forbidden, max=0)
+    # IHE MHD pattern: DocumentReference.content.attachment.url -> Binary fullUrl
+    import uuid as _uuid_binary
+    binary_uuid = str(_uuid_binary.uuid4())
+    binary_resource: dict | None = None
+
     if clinical_b64:
+        binary_resource = {
+            "resourceType": "Binary",
+            "contentType": "text/plain",
+            "data": clinical_b64,
+        }
         doc_ref_dict["content"] = [{
             "attachment": {
                 "contentType": "text/plain",
                 "language": "hr-HR",
-                "data": clinical_b64,
+                "url": f"urn:uuid:{binary_uuid}",
             }
         }]
+    else:
+        doc_ref_dict["content"] = [{
+            "attachment": {
+                "contentType": "text/plain",
+                "language": "hr-HR",
+                "url": f"urn:uuid:{binary_uuid}",
+            }
+        }]
+        binary_resource = {
+            "resourceType": "Binary",
+            "contentType": "text/plain",
+            "data": "",
+        }
 
     # Build IHE MHD ITI-65 transaction bundle (NOT a message bundle!)
-    # ITI-65 requires type="transaction" with SubmissionSet (List) + DocumentReference entries
+    # ITI-65 requires type="transaction" with SubmissionSet + DocumentReference + Binary entries
+    entries = [doc_ref_dict]
+    if binary_resource:
+        binary_resource["_uuid"] = binary_uuid
+        entries.append(binary_resource)
+
     bundle_dict = build_iti65_transaction_bundle(
-        [doc_ref_dict],
+        entries,
         sender_org_code=org_code,
         author_practitioner_id=practitioner_id,
     )
