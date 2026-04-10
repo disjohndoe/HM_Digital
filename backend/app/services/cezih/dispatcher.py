@@ -199,6 +199,9 @@ async def send_enalaz(
     *,
     user_id: UUID | None = None,
     http_client=None,
+    practitioner_id: str | None = None,
+    org_code: str | None = None,
+    source_oid: str | None = None,
 ) -> dict:
     from app.models.patient import Patient
     _require_audit_params(db, user_id, tenant_id)
@@ -237,11 +240,18 @@ async def send_enalaz(
         "preporucena_terapija": record.preporucena_terapija,
     }
 
-    # Get practitioner ID from the record's doktor_id for signing
-    practitioner_id = str(record.doktor_id) if record and record.doktor_id else None
+    if not practitioner_id:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="HZJZ ID djelatnika nije postavljen. Potrebno je za CEZIH potpisivanje.",
+        )
 
     try:
-        result = await real_service.send_enalaz(http_client, patient_data, record_data, practitioner_id=practitioner_id)
+        result = await real_service.send_enalaz(
+            http_client, patient_data, record_data,
+            practitioner_id=practitioner_id,
+            org_code=org_code or "", source_oid=source_oid or "",
+        )
     except CezihError as e:
         logger.error("CEZIH e-Nalaz send failed: %s", e.message)
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=e.message) from e

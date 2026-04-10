@@ -163,10 +163,13 @@ async def send_enalaz(
     db: AsyncSession = Depends(get_db),
 ):
     await check_cezih_access(db, current_user.tenant_id)
+    org_code, source_oid = await _get_tenant_cezih_config(db, current_user.tenant_id)
     return await cezih.send_enalaz(
         db, current_user.tenant_id, data.patient_id, data.record_id,
         user_id=current_user.id,
         http_client=_http_client(request),
+        practitioner_id=current_user.practitioner_id or "",
+        org_code=org_code, source_oid=source_oid,
     )
 
 

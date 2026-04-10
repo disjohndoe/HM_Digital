@@ -128,10 +128,13 @@ async def send_enalaz(
     patient_data: dict,
     record_data: dict,
     practitioner_id: str | None = None,
+    org_code: str = "",
+    source_oid: str = "",
 ) -> dict:
     """Send clinical document / finding (ITI-65 MHD).
 
-    POST /doc-mhd-svc/api/v1/iti-65-service
+    Builds a FHIR message Bundle with MessageHeader + DocumentReference,
+    signs it via extsigner/smartcard, and POSTs to doc-mhd-svc.
     """
     import base64
 
@@ -165,7 +168,7 @@ async def send_enalaz(
     clinical_text = "\n".join(content_parts)
     clinical_b64 = base64.b64encode(clinical_text.encode("utf-8")).decode("ascii") if clinical_text else None
 
-    # Build DocumentReference — map tip to CEZIH LOINC code
+    # Build DocumentReference — map tip to CEZIH document type code
     coding = get_cezih_document_coding(record_data.get("tip", "nalaz"))
     doc_ref_dict: dict = {
         "resourceType": "DocumentReference",
@@ -194,15 +197,14 @@ async def send_enalaz(
             }
         }]
 
-    # Wrap in a Bundle (ITI-65 expects a Bundle)
-    bundle = FHIRBundle(
-        type="document",
-        timestamp=datetime.now(UTC).isoformat(),
-        entry=[FHIRBundleEntry(resource=doc_ref_dict)],
+    # Wrap in a FHIR message Bundle (same format as working visit/case bundles)
+    bundle_dict = await build_message_bundle(
+        "3.1", doc_ref_dict,
+        sender_org_code=org_code, author_practitioner_id=practitioner_id,
+        source_oid=source_oid,
     )
 
-    # Add digital signature if practitioner_id is provided
-    bundle_dict = bundle.model_dump(by_alias=True, exclude_none=True)
+    # Sign the bundle
     if practitioner_id:
         bundle_dict = await add_signature(bundle_dict, practitioner_id, http_client=client)
 
@@ -217,9 +219,11 @@ async def send_enalaz(
         ref_id = response.get("id", "")
     elif response.get("resourceType") == "Bundle":
         entries = response.get("entry", [])
-        if entries:
-            resource = entries[0].get("resource", {})
-            ref_id = resource.get("id", "")
+        for entry in entries:
+            resource = entry.get("resource", {})
+            if resource.get("resourceType") == "DocumentReference":
+                ref_id = resource.get("id", "")
+                break
 
     if not ref_id:
         ref_id = f"FHIR-{datetime.now(UTC).strftime('%Y%m%d%H%M%S')}"
