@@ -201,6 +201,7 @@ async def send_enalaz(
     http_client=None,
 ) -> dict:
     from app.models.patient import Patient
+    _require_audit_params(db, user_id, tenant_id)
 
     record = await _get_medical_record(db, tenant_id, patient_id, record_id)
     if not record:
