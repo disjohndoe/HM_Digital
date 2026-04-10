@@ -143,6 +143,73 @@ async def build_message_bundle(
     return bundle
 
 
+def build_iti65_transaction_bundle(
+    entries: list[dict[str, Any]],
+    *,
+    sender_org_code: str | None = None,
+    author_practitioner_id: str | None = None,
+) -> dict[str, Any]:
+    """Build a FHIR Bundle type='transaction' for IHE MHD ITI-65 document submission.
+
+    IHE MHD ITI-65 requires type="transaction" (NOT type="message").
+    Each entry must have a `request` with method and url.
+    Optionally includes a SubmissionSet (List) as the first entry.
+    """
+    # Build SubmissionSet (List) — required by IHE MHD ITI-65
+    submission_set_uuid = str(uuid.uuid4())
+    submission_set: dict[str, Any] = {
+        "resourceType": "List",
+        "status": "current",
+        "mode": "working",
+        "code": {
+            "coding": [{
+                "system": "https://profiles.ihe.net/ITI/MHD/CodeSystem/MHDlistTypes",
+                "code": "submissionset",
+            }]
+        },
+        "date": _now_iso(),
+    }
+    if sender_org_code:
+        submission_set["source"] = org_ref(sender_org_code)
+    if author_practitioner_id:
+        submission_set["extension"] = [{
+            "url": "https://profiles.ihe.net/ITI/MHD/StructureDefinition/ihe-authorOrg",
+            "valueReference": org_ref(sender_org_code) if sender_org_code else {},
+        }]
+
+    # SubmissionSet entry references all DocumentReference entries
+    doc_ref_uuids = [e.get("_uuid", str(uuid.uuid4())) for e in entries]
+    submission_set["entry"] = [
+        {"item": {"reference": f"urn:uuid:{u}"}} for u in doc_ref_uuids
+    ]
+
+    bundle_entries: list[dict[str, Any]] = [
+        {
+            "fullUrl": f"urn:uuid:{submission_set_uuid}",
+            "resource": submission_set,
+            "request": {"method": "POST", "url": "List"},
+        }
+    ]
+
+    for i, entry_resource in enumerate(entries):
+        entry_uuid = doc_ref_uuids[i]
+        # Remove internal _uuid marker if present
+        resource = {k: v for k, v in entry_resource.items() if k != "_uuid"}
+        bundle_entries.append({
+            "fullUrl": f"urn:uuid:{entry_uuid}",
+            "resource": resource,
+            "request": {"method": "POST", "url": resource.get("resourceType", "DocumentReference")},
+        })
+
+    return {
+        "resourceType": "Bundle",
+        "id": str(uuid.uuid4()),
+        "type": "transaction",
+        "timestamp": _now_iso(),
+        "entry": bundle_entries,
+    }
+
+
 async def add_signature(
     bundle: dict[str, Any],
     practitioner_id: str,

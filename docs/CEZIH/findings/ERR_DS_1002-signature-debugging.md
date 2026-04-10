@@ -1,7 +1,7 @@
 ---
 date: 2026-04-09
 topic: ERR_DS_1002 root cause
-status: active
+status: resolved
 ---
 
 # ERR_DS_1002 — Root Cause: NOT the Signature
@@ -113,6 +113,14 @@ Expanded test_extsigner.py with T9-T12. Results:
 2. **Or contact HZZO/AKD** — ask if test env mobile signing needs special activation
 3. **Once mobile signing works:** extsigner returns signed Bundle → plug into $process-message → no agent needed for signing
 4. **Agent is still needed** for VPN access (clinical endpoints on port 8443)
+
+## RESOLVED (2026-04-10)
+
+**Root cause:** Missing Encounter.type slices (VrstaPosjete + TipPosjete) — fixed in `message_builder.py`.
+**Working method:** Extsigner (Certilia remote signing) — smart card NCrypt JWS still fails with business-rule rejection (cert not registered), but extsigner bypasses this entirely.
+**TC12 verified live 2026-04-10** — create visit works end-to-end via extsigner + `$process-message`.
+
+Note: The ITI-65 document submission 403 is a SEPARATE issue (wrong bundle type — message vs transaction). See `ITI-65-403-blocker.md`.
 
 ## Evidence: Signature Is NOT the Cause
 

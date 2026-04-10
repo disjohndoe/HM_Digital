@@ -762,12 +762,13 @@ async def dispatch_replace_document(
     user_id: UUID | None = None,
     tenant_id: UUID | None = None,
     http_client=None,
+    org_code: str = "",
+    practitioner_id: str | None = None,
 ) -> dict:
     _require_audit_params(db, user_id, tenant_id)
 
-    # Get practitioner ID from the record for signing
-    practitioner_id = None
-    if record_id:
+    # Get practitioner ID from the record for signing (fallback)
+    if not practitioner_id and record_id:
         record = await _get_medical_record_by_id(db, tenant_id, record_id)
         if record and record.doktor_id:
             practitioner_id = str(record.doktor_id)
@@ -776,6 +777,7 @@ async def dispatch_replace_document(
         result = await real_service.replace_document(
             http_client, original_reference_id, patient_data or {}, record_data or {},
             practitioner_id=practitioner_id,
+            org_code=org_code,
         )
     except CezihError as e:
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=e.message) from e
@@ -803,10 +805,15 @@ async def dispatch_cancel_document(
     user_id: UUID | None = None,
     tenant_id: UUID | None = None,
     http_client=None,
+    org_code: str = "",
+    practitioner_id: str | None = None,
 ) -> dict:
     _require_audit_params(db, user_id, tenant_id)
     try:
-        result = await real_service.cancel_document(http_client, reference_id)
+        result = await real_service.cancel_document(
+            http_client, reference_id,
+            org_code=org_code, practitioner_id=practitioner_id,
+        )
     except CezihError as e:
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=e.message) from e
     await _write_audit(
