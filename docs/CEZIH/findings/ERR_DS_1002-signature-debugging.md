@@ -33,11 +33,86 @@ ERR_DS_1002 may be a generic server-side validation error, not specifically abou
 ### 4. Test environment misconfiguration
 Test env provisioned 2026-04-07, may not be fully set up.
 
-## Next Steps
+## UPDATE 2026-04-09 15:48 — JWS fix changes error type!
 
-1. **Deploy the Encounter.type fix and retest TC12** — if this resolves ERR_DS_1002, the 54 signature commits were all chasing the wrong problem
-2. If still failing, contact HZZO and ask what ERR_DS_1002 means for a valid Bundle
-3. Only after confirming the message structure is correct, switch signing to JWS format per spec 3.4
+Switched from raw signing to proper JWS (RFC 7515 with x5c cert chain).
+
+**Before (raw signing):** `OperationOutcome.issue.code = "invalid"` — format rejected
+**After (JWS with x5c):** `OperationOutcome.issue.code = "business-rule"` — format ACCEPTED, business rule rejects
+
+This proves: the signature FORMAT is now correct. The remaining ERR_DS_1002 is a
+BUSINESS RULE rejection — most likely the signing certificate is not registered
+with CEZIH for our test practitioner/institution.
+
+## UPDATE 2026-04-09 16:38 — Extsigner API fully reverse-engineered!
+
+### Confirmed API Schema (certws2.cezih.hr:8443)
+
+```
+POST /services-router/gateway/extsigner/api/sign
+Content-Type: application/json
+Auth: mTLS session (smart card via SChannel)
+
+{
+    "oib": "15881939647",
+    "sourceSystem": "HM_DIGITAL",
+    "requestId": "<uuid>",
+    "documents": [{
+        "documentType": "FHIR_MESSAGE",   // enum: FHIR_MESSAGE, FHIR_DOCUMENT
+        "mimeType": "JSON",               // enum: JSON, XML (NOT MIME strings!)
+        "base64Document": "<base64-encoded-FHIR-bundle>",
+        "messageId": "<uuid>"
+    }]
+}
+```
+
+### Field Discovery Method
+- Empty `{}` body → revealed top-level: `oib`, `sourceSystem`, `requestId`, `documents`
+- Empty `[{}]` doc → revealed doc fields: `documentType`, `mimeType`, `base64Document`, `messageId`
+- Enum brute-force → documentType: `FHIR_MESSAGE` (message bundles), `FHIR_DOCUMENT` (doc bundles)
+- Enum brute-force → mimeType: `JSON`, `XML` (other values treated as null)
+- Service name: `rdss-service` (Remote Digital Signing Service)
+
+### Current Blocker: Mobile Signing Activation
+Request reaches AKD/Certilia backend → **ERROR_CODE_0025** code 31:
+"Korisnik trenutno ne moze potpisati na mobitelu." (User cannot sign on mobile)
+
+This means:
+1. API format is 100% CORRECT
+2. The signing backend requires Certilia mobile app confirmation (2FA)
+3. Need to activate/configure AKD Potpis mobile app for OIB 15881939647
+4. Or ask HZZO if test environment has a bypass for mobile confirmation
+
+### Interesting: FHIR_DOCUMENT combo
+- `FHIR_DOCUMENT` + `JSON` → `INVALID_JSON_PAYLOAD` (code A250) — likely expects different Bundle structure
+- `FHIR_MESSAGE` + `XML` → `UNSUPPORTED_COMBINATION_SIGNATURE_FORMAT_SUBFORMAT` (code 732)
+
+### UPDATE 2026-04-09 17:09 — Extsigner confirmed on BOTH paths!
+
+Expanded test_extsigner.py with T9-T12. Results:
+
+| Test | Endpoint | Auth | HTTP | Result |
+|------|----------|------|------|--------|
+| T9 | certpubws (public) | OAuth2 Bearer | 401 | ERROR_CODE_0025 code 31 — "ne može potpisati na mobitelu" |
+| T10 | certws2:8443 (VPN) | mTLS smart card | 500 | ERROR_CODE_0025 code 31 — same message |
+| T11 | certws2:8443 (VPN) | mTLS + Bearer | 500 | HTML 401 (auth conflict) |
+| T12 | certpubws (public) | mTLS only | 401 | empty body (needs Bearer) |
+
+**KEY FINDINGS:**
+1. **Both paths (T9 + T10) reach the AKD signing backend** — API format is 100% correct
+2. **Same blocker on both:** AKD Potpis mobile app not activated for OIB 15881939647
+3. HTTP status codes are misleading (401/500) — the error body confirms the request WAS processed
+4. certpubws requires Bearer token (T12 mTLS-only = empty 401)
+5. Don't mix mTLS + Bearer (T11 = auth conflict)
+
+**Also fixed:** `build_encounter_create()` was missing Encounter.type slices (vrstaPosjete/tipPosjete) — params existed but were never used. Fixed to match `build_encounter_update()`.
+
+### Next Steps
+
+1. **Install/configure AKD Potpis mobile app** for OIB 15881939647 — this is the ONLY remaining blocker for cloud signing
+2. **Or contact HZZO/AKD** — ask if test env mobile signing needs special activation
+3. **Once mobile signing works:** extsigner returns signed Bundle → plug into $process-message → no agent needed for signing
+4. **Agent is still needed** for VPN access (clinical endpoints on port 8443)
 
 ## Evidence: Signature Is NOT the Cause
 

@@ -7,6 +7,7 @@ import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import {
   Table,
   TableBody,
@@ -142,109 +143,129 @@ export function PatientCezihTab({ patientId, patientMbo }: PatientCezihTabProps)
         </Card>
       </div>
 
-      {/* e-Nalaz history */}
-      <Card>
-        <CardHeader className="flex flex-row items-center justify-between">
-          <div className="flex items-center gap-2">
-            <FileText className="h-4 w-4 text-muted-foreground" />
-            <CardTitle className="text-sm font-medium">e-Nalaz povijest</CardTitle>
-          </div>
-        </CardHeader>
-        <CardContent>
-          {!summary?.e_nalaz_history.length ? (
-            <p className="text-sm text-muted-foreground text-center py-4">
-              Nema poslanih e-Nalaza za ovog pacijenta
-            </p>
+      {/* Sub-tabs: Posjete / Slučajevi / e-Nalazi */}
+      <Tabs defaultValue="posjete" className="space-y-4">
+        <TabsList>
+          <TabsTrigger value="posjete">Posjete</TabsTrigger>
+          <TabsTrigger value="slucajevi">Slučajevi</TabsTrigger>
+          <TabsTrigger value="e-nalazi">e-Nalazi</TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="posjete">
+          {patientMbo ? (
+            <VisitManagement patientId={patientId} patientMbo={patientMbo} />
           ) : (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Datum</TableHead>
-                  <TableHead>Tip</TableHead>
-                  <TableHead className="hidden sm:table-cell">Referenca</TableHead>
-                  <TableHead className="hidden md:table-cell">Potpis</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead className="text-right">Akcije</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {summary.e_nalaz_history.map((item) => (
-                  <TableRow key={item.record_id}>
-                    <TableCell className="text-sm">{formatDateTimeHR(item.datum)}</TableCell>
-                    <TableCell>
-                      <Badge variant="outline" className="text-xs">
-                        {tipLabelMap[item.tip] || item.tip}
-                      </Badge>
-                    </TableCell>
-                    <TableCell className="hidden sm:table-cell font-mono text-xs">
-                      {item.reference_id || "—"}
-                    </TableCell>
-                    <TableCell className="hidden md:table-cell">
-                      {item.cezih_signed ? (
-                        <div className="flex items-center gap-1" title={`Potpisano: ${formatDateTimeHR(item.cezih_signed_at || "")}`}>
-                          <CheckCircle2 className="h-3.5 w-3.5 text-green-600" />
-                          <span className="text-xs text-green-700">Da</span>
-                        </div>
-                      ) : (
-                        <div className="flex items-center gap-1" title="Nema digitalnog potpisa">
-                          <XCircle className="h-3.5 w-3.5 text-muted-foreground" />
-                          <span className="text-xs text-muted-foreground">Ne</span>
-                        </div>
-                      )}
-                    </TableCell>
-                    <TableCell>
-                      <Badge
-                        variant="outline"
-                        className={
-                          item.cezih_storno
-                            ? "bg-red-100 text-red-800 border-red-200"
-                            : "bg-green-100 text-green-800 border-green-200"
-                        }
-                      >
-                        {item.cezih_storno ? "Storniran" : "Poslan"}
-                      </Badge>
-                    </TableCell>
-                    <TableCell className="text-right">
-                      {!item.cezih_storno && item.reference_id && (
-                        <div className="flex justify-end gap-1">
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            className="h-8 w-8 p-0"
-                            onClick={() => setNalazReplaceTarget(item.reference_id)}
-                            title="Zamijeni e-Nalaz"
-                          >
-                            <RefreshCw className="h-3.5 w-3.5" />
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            className="h-8 w-8 p-0 text-destructive hover:text-destructive"
-                            onClick={() => setNalazStornoTarget(item.reference_id)}
-                            title="Storno e-Nalaza"
-                          >
-                            <Trash2 className="h-3.5 w-3.5" />
-                          </Button>
-                        </div>
-                      )}
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
+            <p className="text-sm text-muted-foreground py-4 text-center">
+              Pacijent nema MBO — posjete nisu dostupne
+            </p>
           )}
-        </CardContent>
-      </Card>
+        </TabsContent>
 
-      {/* Visit Management (TC12-14) */}
-      {patientMbo && (
-        <VisitManagement patientId={patientId} patientMbo={patientMbo} />
-      )}
+        <TabsContent value="slucajevi">
+          {patientMbo ? (
+            <CaseManagement patientId={patientId} patientMbo={patientMbo} />
+          ) : (
+            <p className="text-sm text-muted-foreground py-4 text-center">
+              Pacijent nema MBO — slučajevi nisu dostupni
+            </p>
+          )}
+        </TabsContent>
 
-      {/* Case Management (TC15-17) */}
-      {patientMbo && (
-        <CaseManagement patientId={patientId} patientMbo={patientMbo} />
-      )}
+        <TabsContent value="e-nalazi">
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between">
+              <div className="flex items-center gap-2">
+                <FileText className="h-4 w-4 text-muted-foreground" />
+                <CardTitle className="text-sm font-medium">e-Nalaz povijest</CardTitle>
+              </div>
+            </CardHeader>
+            <CardContent>
+              {!summary?.e_nalaz_history.length ? (
+                <p className="text-sm text-muted-foreground text-center py-4">
+                  Nema poslanih e-Nalaza za ovog pacijenta
+                </p>
+              ) : (
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Datum</TableHead>
+                      <TableHead>Tip</TableHead>
+                      <TableHead className="hidden sm:table-cell">Referenca</TableHead>
+                      <TableHead className="hidden md:table-cell">Potpis</TableHead>
+                      <TableHead>Status</TableHead>
+                      <TableHead className="text-right">Akcije</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {summary.e_nalaz_history.map((item) => (
+                      <TableRow key={item.record_id}>
+                        <TableCell className="text-sm">{formatDateTimeHR(item.datum)}</TableCell>
+                        <TableCell>
+                          <Badge variant="outline" className="text-xs">
+                            {tipLabelMap[item.tip] || item.tip}
+                          </Badge>
+                        </TableCell>
+                        <TableCell className="hidden sm:table-cell font-mono text-xs">
+                          {item.reference_id || "—"}
+                        </TableCell>
+                        <TableCell className="hidden md:table-cell">
+                          {item.cezih_signed ? (
+                            <div className="flex items-center gap-1" title={`Potpisano: ${formatDateTimeHR(item.cezih_signed_at || "")}`}>
+                              <CheckCircle2 className="h-3.5 w-3.5 text-green-600" />
+                              <span className="text-xs text-green-700">Da</span>
+                            </div>
+                          ) : (
+                            <div className="flex items-center gap-1" title="Nema digitalnog potpisa">
+                              <XCircle className="h-3.5 w-3.5 text-muted-foreground" />
+                              <span className="text-xs text-muted-foreground">Ne</span>
+                            </div>
+                          )}
+                        </TableCell>
+                        <TableCell>
+                          <Badge
+                            variant="outline"
+                            className={
+                              item.cezih_storno
+                                ? "bg-red-100 text-red-800 border-red-200"
+                                : "bg-green-100 text-green-800 border-green-200"
+                            }
+                          >
+                            {item.cezih_storno ? "Storniran" : "Poslan"}
+                          </Badge>
+                        </TableCell>
+                        <TableCell className="text-right">
+                          {!item.cezih_storno && item.reference_id && (
+                            <div className="flex justify-end gap-1">
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="h-8 w-8 p-0"
+                                onClick={() => setNalazReplaceTarget(item.reference_id)}
+                                title="Zamijeni e-Nalaz"
+                              >
+                                <RefreshCw className="h-3.5 w-3.5" />
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="h-8 w-8 p-0 text-destructive hover:text-destructive"
+                                onClick={() => setNalazStornoTarget(item.reference_id)}
+                                title="Storno e-Nalaza"
+                              >
+                                <Trash2 className="h-3.5 w-3.5" />
+                              </Button>
+                            </div>
+                          )}
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+      </Tabs>
 
       <PrescriptionForm
         open={eReceptOpen}

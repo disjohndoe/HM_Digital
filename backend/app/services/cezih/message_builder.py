@@ -282,7 +282,7 @@ def build_encounter_create(
     Uses CEZIH Croatian CodeSystems:
       - Encounter.class: nacin-prijema (method of admission)
     """
-    # Match official CEZIH example exactly — NO type field, field order matches spec
+    # Match official CEZIH example — field order matches spec
     encounter: dict[str, Any] = {
         "resourceType": "Encounter",
         "extension": [
@@ -301,7 +301,18 @@ def build_encounter_create(
             "display": NACIN_PRIJEMA_MAP.get(nacin_prijema, nacin_prijema),
         },
         "subject": patient_ref(patient_mbo),
+        "type": [],
     }
+    if vrsta_posjete:
+        encounter["type"].append({
+            "coding": [{"system": CS_VRSTA_POSJETE, "code": vrsta_posjete}],
+        })
+    if tip_posjete:
+        encounter["type"].append({
+            "coding": [{"system": CS_TIP_POSJETE, "code": tip_posjete}],
+        })
+    if not encounter["type"]:
+        del encounter["type"]
     if practitioner_id:
         encounter["participant"] = [{
             "individual": practitioner_ref(practitioner_id),

@@ -3,7 +3,7 @@
 import { useState } from "react"
 import { useParams } from "next/navigation"
 import Link from "next/link"
-import { PencilIcon, Upload, FileText, Send, PlusIcon, Loader2, Download } from "lucide-react"
+import { PencilIcon, Upload, FileText, Send, PlusIcon, Loader2, Download, CalendarPlus } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -36,6 +36,7 @@ export default function PacijentDetailPage() {
   const [ekartonOpen, setEkartonOpen] = useState(false)
   const [sendNalazOpen, setSendNalazOpen] = useState(false)
   const [newRecordOpen, setNewRecordOpen] = useState(false)
+  const [activeTab, setActiveTab] = useState("pregled")
   const { canViewMedicalRecords, canViewCezih, canViewDocuments, canUploadDocuments, canEditMedicalRecord, canPerformCezihOps } = usePermissions()
   const exportMutation = useExportPatientData()
   const queryClient = useQueryClient()
@@ -98,7 +99,7 @@ export default function PacijentDetailPage() {
       {/* CEZIH action buttons */}
       {canPerformCezihOps && (
         <div className="space-y-4">
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
             <Button
               size="lg"
               variant={ekartonOpen ? "default" : "outline"}
@@ -116,6 +117,20 @@ export default function PacijentDetailPage() {
             >
               <FileText className="mr-2 h-5 w-5" />
               {ekartonOpen ? "Sakrij e-Karton" : "Dohvati e-Karton"}
+            </Button>
+            <Button
+              size="lg"
+              className="h-12 text-base bg-violet-600 hover:bg-violet-700 text-white"
+              onClick={() => {
+                if (!patient.mbo) {
+                  toast.error("Pacijent nema MBO — posjete nisu dostupne")
+                  return
+                }
+                setActiveTab("cezih")
+              }}
+            >
+              <CalendarPlus className="mr-2 h-5 w-5" />
+              Nova posjeta
             </Button>
             <Button
               size="lg"
@@ -145,7 +160,7 @@ export default function PacijentDetailPage() {
         </div>
       )}
 
-      <Tabs defaultValue="pregled">
+      <Tabs value={activeTab} onValueChange={setActiveTab}>
         <TabsList>
           <TabsTrigger value="pregled">Pregled</TabsTrigger>
           <TabsTrigger value="postupci">Postupci</TabsTrigger>
