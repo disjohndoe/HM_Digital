@@ -1,7 +1,7 @@
 "use client"
 
 import { useState } from "react"
-import { Plus, Loader2, Building2, ExternalLink } from "lucide-react"
+import { Plus, Loader2, Building2, ExternalLink, Pencil } from "lucide-react"
 import { toast } from "sonner"
 import { formatDateTimeHR } from "@/lib/utils"
 import { useAuth } from "@/lib/auth"
@@ -29,6 +29,7 @@ import {
 import {
   useListVisits,
   useCreateVisit,
+  useUpdateVisit,
   useVisitAction,
 } from "@/lib/hooks/use-cezih"
 import type { VisitItem } from "@/lib/types"
@@ -63,7 +64,7 @@ const NACIN_PRIJEMA_LABELS: Record<string, string> = {
 }
 
 const VISIT_ACTIONS = [
-  { value: "close", label: "Zatvori posjetu" },
+  { value: "close", label: "Zatvori" },
   { value: "reopen", label: "Ponovno otvori" },
   { value: "storno", label: "Storniraj" },
 ]
@@ -77,24 +78,29 @@ export function VisitManagement({ patientId, patientMbo }: VisitManagementProps)
   const { tenant } = useAuth()
   const { data: visitsData, isLoading } = useListVisits(patientMbo)
   const createVisit = useCreateVisit()
+  const updateVisit = useUpdateVisit()
   const visitAction = useVisitAction()
 
   const [showCreate, setShowCreate] = useState(false)
   const [nacinPrijema, setNacinPrijema] = useState("6")
   const [reason, setReason] = useState("")
   const [actionVisitId, setActionVisitId] = useState<string | null>(null)
+  const [editVisitId, setEditVisitId] = useState<string | null>(null)
+  const [editReason, setEditReason] = useState("")
 
   const visits = visitsData?.visits ?? []
   const myOrgCode = tenant?.sifra_ustanove || ""
 
-  const isOurVisit = (v: VisitItem) =>
-    !!myOrgCode && v.service_provider_code === myOrgCode
+  // If service_provider_code is null/empty, assume it's ours (CEZIH scopes results to our org)
+  // Only mark as external if we KNOW the provider code AND it doesn't match ours
+  const isExternalVisit = (v: VisitItem) =>
+    !!myOrgCode && !!v.service_provider_code && v.service_provider_code !== myOrgCode
 
   // Sort: our visits first, then by period_start descending
   const sortedVisits = [...visits].sort((a, b) => {
-    const aOurs = isOurVisit(a) ? 0 : 1
-    const bOurs = isOurVisit(b) ? 0 : 1
-    if (aOurs !== bOurs) return aOurs - bOurs
+    const aExt = isExternalVisit(a) ? 1 : 0
+    const bExt = isExternalVisit(b) ? 1 : 0
+    if (aExt !== bExt) return aExt - bExt
     const aDate = a.period_start || ""
     const bDate = b.period_start || ""
     return bDate.localeCompare(aDate)
@@ -128,13 +134,36 @@ export function VisitManagement({ patientId, patientMbo }: VisitManagementProps)
     )
   }
 
+  const handleEdit = (visitId: string) => {
+    updateVisit.mutate(
+      { visitId, reason: editReason || undefined, patientMbo },
+      {
+        onSuccess: () => {
+          toast.success("Posjeta ažurirana")
+          setEditVisitId(null)
+          setEditReason("")
+        },
+        onError: (err) => toast.error(err.message),
+      },
+    )
+  }
+
+  const startEdit = (v: VisitItem) => {
+    setEditVisitId(v.visit_id)
+    setEditReason(v.reason || "")
+    setActionVisitId(null)
+  }
+
   const getAvailableActions = (v: VisitItem) => {
     if (v.status === "entered-in-error" || v.status === "cancelled") return []
-    if (!isOurVisit(v)) return [] // Can't act on other providers' visits
+    if (isExternalVisit(v)) return []
     if (v.status === "in-progress") return VISIT_ACTIONS.filter((a) => a.value === "close" || a.value === "storno")
     if (v.status === "finished") return VISIT_ACTIONS.filter((a) => a.value === "reopen" || a.value === "storno")
     return []
   }
+
+  const canEdit = (v: VisitItem) =>
+    !isExternalVisit(v) && (v.status === "in-progress" || v.status === "planned")
 
   return (
     <Card>
@@ -143,7 +172,7 @@ export function VisitManagement({ patientId, patientMbo }: VisitManagementProps)
           <CardTitle className="text-base">Posjete</CardTitle>
           {visits.length > 0 && (
             <span className="text-xs text-muted-foreground">
-              ({visits.filter(isOurVisit).length} naše / {visits.filter((v) => !isOurVisit(v)).length} ostale)
+              ({visits.filter((v) => !isExternalVisit(v)).length} naše / {visits.filter(isExternalVisit).length} ostale)
             </span>
           )}
         </div>
@@ -209,28 +238,29 @@ export function VisitManagement({ patientId, patientMbo }: VisitManagementProps)
                   <TableHead>Razlog</TableHead>
                   <TableHead>Početak</TableHead>
                   <TableHead>Kraj</TableHead>
-                  <TableHead className="w-[100px] text-right">Akcije</TableHead>
+                  <TableHead className="w-[140px] text-right">Akcije</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {sortedVisits.map((v) => {
-                  const ours = isOurVisit(v)
+                  const external = isExternalVisit(v)
                   const actions = getAvailableActions(v)
+                  const isEditing = editVisitId === v.visit_id
                   return (
                     <TableRow
                       key={v.visit_id}
-                      className={ours ? "" : "bg-muted/30"}
+                      className={external ? "bg-muted/30" : ""}
                     >
                       <TableCell>
-                        {ours ? (
-                          <Badge variant="default" className="bg-primary/90 text-xs gap-1">
-                            <Building2 className="h-3 w-3" />
-                            Naša
-                          </Badge>
-                        ) : (
+                        {external ? (
                           <Badge variant="outline" className="text-xs gap-1 text-muted-foreground">
                             <ExternalLink className="h-3 w-3" />
                             Vanjska
+                          </Badge>
+                        ) : (
+                          <Badge variant="default" className="bg-primary/90 text-xs gap-1">
+                            <Building2 className="h-3 w-3" />
+                            Naša
                           </Badge>
                         )}
                       </TableCell>
@@ -243,7 +273,35 @@ export function VisitManagement({ patientId, patientMbo }: VisitManagementProps)
                         {v.visit_type_display || NACIN_PRIJEMA_LABELS[v.visit_type] || v.visit_type}
                       </TableCell>
                       <TableCell className="text-sm text-muted-foreground">
-                        {v.reason || "—"}
+                        {isEditing ? (
+                          <div className="flex items-center gap-1">
+                            <Input
+                              className="h-7 text-sm w-40"
+                              value={editReason}
+                              onChange={(e) => setEditReason(e.target.value)}
+                              placeholder="Razlog posjete"
+                              autoFocus
+                            />
+                            <Button
+                              size="sm"
+                              className="h-7 text-xs px-2"
+                              onClick={() => handleEdit(v.visit_id)}
+                              disabled={updateVisit.isPending}
+                            >
+                              {updateVisit.isPending ? <Loader2 className="h-3 w-3 animate-spin" /> : "Spremi"}
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              className="h-7 text-xs px-2"
+                              onClick={() => { setEditVisitId(null); setEditReason("") }}
+                            >
+                              ×
+                            </Button>
+                          </div>
+                        ) : (
+                          v.reason || "—"
+                        )}
                       </TableCell>
                       <TableCell className="text-sm">
                         {v.period_start ? formatDateTimeHR(v.period_start) : "—"}
@@ -252,32 +310,45 @@ export function VisitManagement({ patientId, patientMbo }: VisitManagementProps)
                         {v.period_end ? formatDateTimeHR(v.period_end) : "—"}
                       </TableCell>
                       <TableCell className="text-right">
-                        {actions.length > 0 && (
-                          actionVisitId === v.visit_id ? (
-                            <div className="flex justify-end gap-1 flex-wrap">
-                              {actions.map((a) => (
-                                <Button
-                                  key={a.value}
-                                  size="sm"
-                                  variant={a.value === "storno" ? "destructive" : "outline"}
-                                  className="h-6 text-xs px-2"
-                                  onClick={() => handleAction(v.visit_id, a.value)}
-                                  disabled={visitAction.isPending}
-                                >
-                                  {visitAction.isPending && <Loader2 className="mr-1 h-3 w-3 animate-spin" />}
-                                  {a.label}
-                                </Button>
-                              ))}
-                              <Button size="sm" variant="ghost" className="h-6 text-xs px-2" onClick={() => setActionVisitId(null)}>
-                                ×
-                              </Button>
-                            </div>
-                          ) : (
-                            <Button size="sm" variant="ghost" className="h-6 text-xs px-2" onClick={() => setActionVisitId(v.visit_id)}>
-                              Akcije
+                        <div className="flex justify-end gap-1 flex-wrap">
+                          {canEdit(v) && !isEditing && (
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              className="h-6 text-xs px-2"
+                              onClick={() => startEdit(v)}
+                              title="Izmijeni podatke posjete (1.2)"
+                            >
+                              <Pencil className="h-3 w-3" />
                             </Button>
-                          )
-                        )}
+                          )}
+                          {actions.length > 0 && (
+                            actionVisitId === v.visit_id ? (
+                              <>
+                                {actions.map((a) => (
+                                  <Button
+                                    key={a.value}
+                                    size="sm"
+                                    variant={a.value === "storno" ? "destructive" : "outline"}
+                                    className="h-6 text-xs px-2"
+                                    onClick={() => handleAction(v.visit_id, a.value)}
+                                    disabled={visitAction.isPending}
+                                  >
+                                    {visitAction.isPending && <Loader2 className="mr-1 h-3 w-3 animate-spin" />}
+                                    {a.label}
+                                  </Button>
+                                ))}
+                                <Button size="sm" variant="ghost" className="h-6 text-xs px-2" onClick={() => setActionVisitId(null)}>
+                                  ×
+                                </Button>
+                              </>
+                            ) : (
+                              <Button size="sm" variant="ghost" className="h-6 text-xs px-2" onClick={() => setActionVisitId(v.visit_id)}>
+                                Akcije
+                              </Button>
+                            )
+                          )}
+                        </div>
                       </TableCell>
                     </TableRow>
                   )
