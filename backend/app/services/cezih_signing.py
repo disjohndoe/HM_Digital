@@ -466,6 +466,80 @@ async def _sign_bundle_cms_fallback(bundle_json_bytes: bytes) -> dict:
     }
 
 
+async def sign_bundle_via_extsigner(
+    bundle_json_bytes: bytes,
+    *,
+    message_id: str | None = None,
+) -> dict:
+    """Sign a FHIR Bundle via CEZIH extsigner API (Certilia remote signing).
+
+    Sends the bundle to certws2:8443/services-router/gateway/extsigner/api/sign
+    via the agent (mTLS). CEZIH pushes a signing request to the user's Certilia
+    app on their phone. User approves → CEZIH returns the signed document.
+
+    This bypasses local smart card signing entirely — CEZIH does the signing
+    with the Certilia cloud certificate.
+    """
+    if not _should_use_agent():
+        raise CezihSigningError("Neispravna CEZIH konekcija — agent nije spojen")
+
+    signer_oib = settings.CEZIH_SIGNER_OIB
+    if not signer_oib:
+        raise CezihSigningError(
+            "CEZIH_SIGNER_OIB nije postavljen. Potrebno je za udaljeno potpisivanje (extsigner)."
+        )
+
+    base_url = settings.CEZIH_FHIR_BASE_URL
+    if not base_url:
+        raise CezihSigningError("CEZIH_FHIR_BASE_URL nije postavljen.")
+
+    url = f"{base_url.rstrip('/')}/services-router/gateway/extsigner/api/sign"
+
+    import uuid as _uuid
+    request_id = str(_uuid.uuid4())
+    msg_id = message_id or str(_uuid.uuid4())
+
+    # Encode bundle as base64
+    bundle_b64 = base64.b64encode(bundle_json_bytes).decode("ascii")
+
+    payload = {
+        "oib": signer_oib,
+        "sourceSystem": "HM-DIGITAL-MEDICAL",
+        "requestId": request_id,
+        "documents": [
+            {
+                "documentType": "FHIR_MESSAGE",
+                "mimeType": "JSON",
+                "base64Document": bundle_b64,
+                "messageId": msg_id,
+            }
+        ],
+    }
+
+    logger.info(
+        "CEZIH extsigner: signing via Certilia (OIB=%.6s..., url=%s, bundle=%d bytes)",
+        signer_oib, url, len(bundle_json_bytes),
+    )
+
+    result = await _request_via_agent(
+        method="POST",
+        url=url,
+        headers={"Content-Type": "application/json", "Accept": "application/json"},
+        form_data=None,
+        json_body=payload,
+        timeout=120,  # Longer timeout — user needs to approve on phone
+    )
+
+    logger.info("CEZIH extsigner response: %s", json.dumps(result, ensure_ascii=False)[:2000])
+
+    return {
+        "success": True,
+        "method": "extsigner",
+        "response": result,
+        "signed_at": datetime.now(UTC).isoformat(),
+    }
+
+
 async def sign_document(
     client: httpx.AsyncClient,
     document_bytes: bytes | str,

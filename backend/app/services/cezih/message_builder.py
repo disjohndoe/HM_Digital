@@ -151,18 +151,101 @@ async def add_signature(
 ) -> dict[str, Any]:
     """Add a digital signature to the Bundle per CEZIH JWS format.
 
-    Uses agent's sign_for_jws which produces proper RFC 7515 JWS compact
-    with JOSE header containing alg, kid, jwk, x5c (full cert chain).
+    Two signing methods (controlled by CEZIH_SIGNING_METHOD):
+    - "smartcard": Agent signs locally via NCrypt + AKD smart card
+    - "extsigner": CEZIH signs remotely via Certilia (user approves on phone)
 
-    signature.data = base64(JWS_compact) — double base64 for HAPI compatibility.
+    For smartcard:
+      signature.data = base64(JWS_compact) — double base64 for HAPI compatibility.
 
-    Flow:
-    1. Add signature object with data="" to the bundle
-    2. Serialize bundle to compact JSON (no whitespace, preserve insertion order)
-    3. Send to agent → agent builds JOSE header (with x5c cert), signs per RFC 7515
-    4. Agent returns base64(base64url(header).base64url(payload).base64url(sig))
-    5. Set bundle.signature.data to the returned string
+    For extsigner:
+      Send full bundle to extsigner API → CEZIH signs with Certilia cloud cert.
+      Response contains the signed document (signature already embedded by CEZIH).
     """
+    import base64 as _base64
+    from app.config import settings
+
+    signing_method = settings.CEZIH_SIGNING_METHOD
+
+    if signing_method == "extsigner":
+        return await _add_signature_extsigner(bundle, practitioner_id)
+
+    # Default: smartcard signing via agent
+    return await _add_signature_smartcard(bundle, practitioner_id, sign_fn)
+
+
+async def _add_signature_extsigner(
+    bundle: dict[str, Any],
+    practitioner_id: str,
+) -> dict[str, Any]:
+    """Sign bundle via CEZIH extsigner (Certilia remote signing on phone).
+
+    Sends the bundle to extsigner API. CEZIH signs it with user's Certilia
+    cloud cert and returns the signed document. We need to extract the
+    signature from the response and set it on our bundle, OR use the
+    returned signed bundle directly.
+    """
+    from app.services.cezih_signing import sign_bundle_via_extsigner
+
+    # Add signature placeholder (extsigner may need it in the structure)
+    bundle["signature"] = {
+        "type": [
+            {
+                "system": SIGNATURE_TYPE_SYSTEM,
+                "code": SIGNATURE_TYPE_CODE,
+            },
+        ],
+        "when": _now_iso(),
+        "who": practitioner_ref(practitioner_id),
+        "data": "",
+    }
+
+    # Serialize to compact JSON
+    bundle_json_bytes = json.dumps(bundle, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+
+    # Extract message ID from bundle for correlation
+    message_id = bundle.get("id", None)
+
+    result = await sign_bundle_via_extsigner(bundle_json_bytes, message_id=message_id)
+
+    response = result.get("response", {})
+
+    # Parse extsigner response — try to extract signed document
+    documents = response.get("documents", [])
+    if documents and documents[0].get("base64Document"):
+        import base64 as _base64
+        signed_bundle_bytes = _base64.b64decode(documents[0]["base64Document"])
+        signed_bundle = json.loads(signed_bundle_bytes)
+        logger.info("Extsigner returned signed bundle — using CEZIH-signed document directly")
+        return signed_bundle
+
+    # If response has a different structure, log it so we can adapt
+    logger.warning("Extsigner response format unexpected — raw response: %s",
+                   json.dumps(response, ensure_ascii=False)[:2000])
+
+    # Fallback: if extsigner returns signature separately
+    signature_data = response.get("signature", response.get("signatureData", ""))
+    if signature_data:
+        bundle["signature"]["data"] = signature_data
+        logger.info("Extsigner returned signature value — applied to bundle")
+        return bundle
+
+    # If we got here, the response didn't contain what we expected.
+    # Return the full response for debugging.
+    from app.services.cezih.exceptions import CezihSigningError
+    raise CezihSigningError(
+        f"Extsigner returned unexpected response format. "
+        f"Keys: {list(response.keys())}. "
+        f"Full response logged at WARNING level."
+    )
+
+
+async def _add_signature_smartcard(
+    bundle: dict[str, Any],
+    practitioner_id: str,
+    sign_fn: Any = None,
+) -> dict[str, Any]:
+    """Sign bundle via agent's smart card (NCrypt JWS signing)."""
     import base64 as _base64
     from app.services.agent_connection_manager import agent_manager
     from app.services.cezih.client import current_tenant_id

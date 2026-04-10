@@ -61,6 +61,8 @@ class Settings(BaseSettings):
     CEZIH_FHIR_AUX_URL: str = ""  # e.g. https://certws2.cezih.hr:9443 (terminology, mCSD, OID, notifications)
     CEZIH_SIGNING_URL: str = ""  # Remote signing endpoint (certpubws.cezih.hr)
     CEZIH_SIGNING_OAUTH2_URL: str = ""  # Public Keycloak for signing (certpubsso.cezih.hr)
+    CEZIH_SIGNING_METHOD: str = "smartcard"  # "smartcard" (NCrypt JWS) or "extsigner" (Certilia remote)
+    CEZIH_SIGNER_OIB: str = ""  # OIB of the signer (required for extsigner)
     CEZIH_TIMEOUT: int = 30
     CEZIH_RETRY_ATTEMPTS: int = 3
     RATE_LIMIT_ENABLED: bool = True
