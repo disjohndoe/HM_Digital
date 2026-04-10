@@ -255,6 +255,8 @@ class CreateVisitRequest(BaseModel):
 
 class UpdateVisitRequest(BaseModel):
     reason: str | None = None
+    nacin_prijema: str | None = None
+    diagnosis_case_id: str | None = None
 
 
 class VisitActionRequest(BaseModel):

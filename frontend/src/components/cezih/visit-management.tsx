@@ -87,12 +87,14 @@ export function VisitManagement({ patientId, patientMbo }: VisitManagementProps)
   const [actionVisitId, setActionVisitId] = useState<string | null>(null)
   const [editVisitId, setEditVisitId] = useState<string | null>(null)
   const [editReason, setEditReason] = useState("")
+  const [editNacinPrijema, setEditNacinPrijema] = useState("")
+  const [editCaseId, setEditCaseId] = useState("")
 
   const visits = visitsData?.visits ?? []
   const myOrgCode = tenant?.sifra_ustanove || ""
 
-  // If service_provider_code is null/empty, assume it's ours (CEZIH scopes results to our org)
   // Only mark as external if we KNOW the provider code AND it doesn't match ours
+  // Unknown provider = assume ours (CEZIH likely scopes results to our org)
   const isExternalVisit = (v: VisitItem) =>
     !!myOrgCode && !!v.service_provider_code && v.service_provider_code !== myOrgCode
 
@@ -136,12 +138,20 @@ export function VisitManagement({ patientId, patientMbo }: VisitManagementProps)
 
   const handleEdit = (visitId: string) => {
     updateVisit.mutate(
-      { visitId, reason: editReason || undefined, patientMbo },
+      {
+        visitId,
+        reason: editReason || undefined,
+        nacin_prijema: editNacinPrijema || undefined,
+        diagnosis_case_id: editCaseId || undefined,
+        patientMbo,
+      },
       {
         onSuccess: () => {
           toast.success("Posjeta ažurirana")
           setEditVisitId(null)
           setEditReason("")
+          setEditNacinPrijema("")
+          setEditCaseId("")
         },
         onError: (err) => toast.error(err.message),
       },
@@ -151,7 +161,16 @@ export function VisitManagement({ patientId, patientMbo }: VisitManagementProps)
   const startEdit = (v: VisitItem) => {
     setEditVisitId(v.visit_id)
     setEditReason(v.reason || "")
+    setEditNacinPrijema(v.visit_type || "6")
+    setEditCaseId("")
     setActionVisitId(null)
+  }
+
+  const cancelEdit = () => {
+    setEditVisitId(null)
+    setEditReason("")
+    setEditNacinPrijema("")
+    setEditCaseId("")
   }
 
   const getAvailableActions = (v: VisitItem) => {
@@ -186,10 +205,10 @@ export function VisitManagement({ patientId, patientMbo }: VisitManagementProps)
           <div className="rounded-lg border p-3 space-y-3">
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1">
-                <Label className="text-xs">Vrsta posjete</Label>
+                <Label className="text-xs">Način prijema</Label>
                 <Select value={nacinPrijema} onValueChange={(v) => v && setNacinPrijema(v)}>
                   <SelectTrigger className="h-8">
-                    <SelectValue placeholder="Odaberi vrstu">
+                    <SelectValue placeholder="Odaberi način">
                       {NACIN_PRIJEMA_LABELS[nacinPrijema] || nacinPrijema}
                     </SelectValue>
                   </SelectTrigger>
@@ -228,133 +247,158 @@ export function VisitManagement({ patientId, patientMbo }: VisitManagementProps)
         ) : visits.length === 0 ? (
           <p className="text-sm text-muted-foreground py-4 text-center">Nema posjeta za ovog pacijenta</p>
         ) : (
-          <div className="rounded-md border">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead className="w-[100px]">Izvor</TableHead>
-                  <TableHead className="w-[100px]">Status</TableHead>
-                  <TableHead>Način prijema</TableHead>
-                  <TableHead>Razlog</TableHead>
-                  <TableHead>Početak</TableHead>
-                  <TableHead>Kraj</TableHead>
-                  <TableHead className="w-[140px] text-right">Akcije</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {sortedVisits.map((v) => {
-                  const external = isExternalVisit(v)
-                  const actions = getAvailableActions(v)
-                  const isEditing = editVisitId === v.visit_id
-                  return (
-                    <TableRow
-                      key={v.visit_id}
-                      className={external ? "bg-muted/30" : ""}
-                    >
-                      <TableCell>
-                        {external ? (
-                          <Badge variant="outline" className="text-xs gap-1 text-muted-foreground">
-                            <ExternalLink className="h-3 w-3" />
-                            Vanjska
-                          </Badge>
-                        ) : (
-                          <Badge variant="default" className="bg-primary/90 text-xs gap-1">
-                            <Building2 className="h-3 w-3" />
-                            Naša
-                          </Badge>
-                        )}
-                      </TableCell>
-                      <TableCell>
-                        <Badge variant="secondary" className={VISIT_STATUS_COLORS[v.status] || ""}>
-                          {VISIT_STATUS_LABELS[v.status] || v.status}
-                        </Badge>
-                      </TableCell>
-                      <TableCell className="text-sm">
-                        {v.visit_type_display || NACIN_PRIJEMA_LABELS[v.visit_type] || v.visit_type}
-                      </TableCell>
-                      <TableCell className="text-sm text-muted-foreground">
-                        {isEditing ? (
-                          <div className="flex items-center gap-1">
-                            <Input
-                              className="h-7 text-sm w-40"
-                              value={editReason}
-                              onChange={(e) => setEditReason(e.target.value)}
-                              placeholder="Razlog posjete"
-                              autoFocus
-                            />
-                            <Button
-                              size="sm"
-                              className="h-7 text-xs px-2"
-                              onClick={() => handleEdit(v.visit_id)}
-                              disabled={updateVisit.isPending}
-                            >
-                              {updateVisit.isPending ? <Loader2 className="h-3 w-3 animate-spin" /> : "Spremi"}
-                            </Button>
-                            <Button
-                              size="sm"
-                              variant="ghost"
-                              className="h-7 text-xs px-2"
-                              onClick={() => { setEditVisitId(null); setEditReason("") }}
-                            >
-                              ×
-                            </Button>
-                          </div>
-                        ) : (
-                          v.reason || "—"
-                        )}
-                      </TableCell>
-                      <TableCell className="text-sm">
-                        {v.period_start ? formatDateTimeHR(v.period_start) : "—"}
-                      </TableCell>
-                      <TableCell className="text-sm">
-                        {v.period_end ? formatDateTimeHR(v.period_end) : "—"}
-                      </TableCell>
-                      <TableCell className="text-right">
-                        <div className="flex justify-end gap-1 flex-wrap">
-                          {canEdit(v) && !isEditing && (
-                            <Button
-                              size="sm"
-                              variant="ghost"
-                              className="h-6 text-xs px-2"
-                              onClick={() => startEdit(v)}
-                              title="Izmijeni podatke posjete (1.2)"
-                            >
-                              <Pencil className="h-3 w-3" />
-                            </Button>
+          <div className="space-y-3">
+            <div className="rounded-md border">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead className="w-[100px]">Izvor</TableHead>
+                    <TableHead className="w-[100px]">Status</TableHead>
+                    <TableHead>Način prijema</TableHead>
+                    <TableHead>Razlog</TableHead>
+                    <TableHead>Početak</TableHead>
+                    <TableHead>Kraj</TableHead>
+                    <TableHead className="w-[140px] text-right">Akcije</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {sortedVisits.map((v) => {
+                    const external = isExternalVisit(v)
+                    const actions = getAvailableActions(v)
+                    return (
+                      <TableRow
+                        key={v.visit_id}
+                        className={external ? "bg-muted/30" : ""}
+                      >
+                        <TableCell>
+                          {external ? (
+                            <Badge variant="outline" className="text-xs gap-1 text-muted-foreground">
+                              <ExternalLink className="h-3 w-3" />
+                              Vanjska
+                            </Badge>
+                          ) : (
+                            <Badge variant="default" className="bg-primary/90 text-xs gap-1">
+                              <Building2 className="h-3 w-3" />
+                              Naša
+                            </Badge>
                           )}
-                          {actions.length > 0 && (
-                            actionVisitId === v.visit_id ? (
-                              <>
-                                {actions.map((a) => (
-                                  <Button
-                                    key={a.value}
-                                    size="sm"
-                                    variant={a.value === "storno" ? "destructive" : "outline"}
-                                    className="h-6 text-xs px-2"
-                                    onClick={() => handleAction(v.visit_id, a.value)}
-                                    disabled={visitAction.isPending}
-                                  >
-                                    {visitAction.isPending && <Loader2 className="mr-1 h-3 w-3 animate-spin" />}
-                                    {a.label}
-                                  </Button>
-                                ))}
-                                <Button size="sm" variant="ghost" className="h-6 text-xs px-2" onClick={() => setActionVisitId(null)}>
-                                  ×
-                                </Button>
-                              </>
-                            ) : (
-                              <Button size="sm" variant="ghost" className="h-6 text-xs px-2" onClick={() => setActionVisitId(v.visit_id)}>
-                                Akcije
+                        </TableCell>
+                        <TableCell>
+                          <Badge variant="secondary" className={VISIT_STATUS_COLORS[v.status] || ""}>
+                            {VISIT_STATUS_LABELS[v.status] || v.status}
+                          </Badge>
+                        </TableCell>
+                        <TableCell className="text-sm">
+                          {v.visit_type_display || NACIN_PRIJEMA_LABELS[v.visit_type] || v.visit_type}
+                        </TableCell>
+                        <TableCell className="text-sm text-muted-foreground">
+                          {v.reason || "—"}
+                        </TableCell>
+                        <TableCell className="text-sm">
+                          {v.period_start ? formatDateTimeHR(v.period_start) : "—"}
+                        </TableCell>
+                        <TableCell className="text-sm">
+                          {v.period_end ? formatDateTimeHR(v.period_end) : "—"}
+                        </TableCell>
+                        <TableCell className="text-right">
+                          <div className="flex justify-end gap-1 flex-wrap">
+                            {canEdit(v) && (
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                className="h-6 text-xs px-2"
+                                onClick={() => startEdit(v)}
+                                title="Izmijeni podatke posjete (1.2)"
+                              >
+                                <Pencil className="h-3 w-3" />
                               </Button>
-                            )
-                          )}
-                        </div>
-                      </TableCell>
-                    </TableRow>
-                  )
-                })}
-              </TableBody>
-            </Table>
+                            )}
+                            {actions.length > 0 && (
+                              actionVisitId === v.visit_id ? (
+                                <>
+                                  {actions.map((a) => (
+                                    <Button
+                                      key={a.value}
+                                      size="sm"
+                                      variant={a.value === "storno" ? "destructive" : "outline"}
+                                      className="h-6 text-xs px-2"
+                                      onClick={() => handleAction(v.visit_id, a.value)}
+                                      disabled={visitAction.isPending}
+                                    >
+                                      {visitAction.isPending && <Loader2 className="mr-1 h-3 w-3 animate-spin" />}
+                                      {a.label}
+                                    </Button>
+                                  ))}
+                                  <Button size="sm" variant="ghost" className="h-6 text-xs px-2" onClick={() => setActionVisitId(null)}>
+                                    ×
+                                  </Button>
+                                </>
+                              ) : (
+                                <Button size="sm" variant="ghost" className="h-6 text-xs px-2" onClick={() => setActionVisitId(v.visit_id)}>
+                                  Akcije
+                                </Button>
+                              )
+                            )}
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    )
+                  })}
+                </TableBody>
+              </Table>
+            </div>
+
+            {/* Edit form — shown below table when editing a visit */}
+            {editVisitId && (
+              <div className="rounded-lg border p-3 space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-sm font-medium">Izmjena posjete: <span className="font-mono text-xs text-muted-foreground">{editVisitId}</span></span>
+                  <Button size="sm" variant="ghost" className="h-6 text-xs px-2" onClick={cancelEdit}>×</Button>
+                </div>
+                <div className="grid grid-cols-3 gap-3">
+                  <div className="space-y-1">
+                    <Label className="text-xs">Način prijema</Label>
+                    <Select value={editNacinPrijema} onValueChange={(v) => v && setEditNacinPrijema(v)}>
+                      <SelectTrigger className="h-8">
+                        <SelectValue>
+                          {NACIN_PRIJEMA_LABELS[editNacinPrijema] || editNacinPrijema}
+                        </SelectValue>
+                      </SelectTrigger>
+                      <SelectContent>
+                        {Object.entries(NACIN_PRIJEMA_LABELS).map(([val, label]) => (
+                          <SelectItem key={val} value={val}>{label}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-xs">Razlog</Label>
+                    <Input
+                      className="h-8 text-sm"
+                      placeholder="Razlog posjete"
+                      value={editReason}
+                      onChange={(e) => setEditReason(e.target.value)}
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-xs">Povezani slučaj (ID)</Label>
+                    <Input
+                      className="h-8 text-sm"
+                      placeholder="ID slučaja (opcionalno)"
+                      value={editCaseId}
+                      onChange={(e) => setEditCaseId(e.target.value)}
+                    />
+                  </div>
+                </div>
+                <div className="flex justify-end gap-2">
+                  <Button size="sm" variant="outline" onClick={cancelEdit}>Odustani</Button>
+                  <Button size="sm" onClick={() => handleEdit(editVisitId)} disabled={updateVisit.isPending}>
+                    {updateVisit.isPending && <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />}
+                    Spremi izmjene
+                  </Button>
+                </div>
+              </div>
+            )}
           </div>
         )}
       </CardContent>

@@ -329,8 +329,12 @@ export function useCreateVisit() {
 export function useUpdateVisit() {
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: ({ visitId, reason, patientMbo }: { visitId: string; reason?: string; patientMbo: string }) =>
-      api.patch<VisitResponse>(`/cezih/visits/${visitId}?mbo=${encodeURIComponent(patientMbo)}`, { reason }),
+    mutationFn: ({ visitId, reason, nacin_prijema, diagnosis_case_id, patientMbo }: {
+      visitId: string; reason?: string; nacin_prijema?: string; diagnosis_case_id?: string; patientMbo: string
+    }) =>
+      api.patch<VisitResponse>(`/cezih/visits/${visitId}?mbo=${encodeURIComponent(patientMbo)}`, {
+        reason, nacin_prijema, diagnosis_case_id,
+      }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["cezih", "visits"] })
       qc.invalidateQueries({ queryKey: ["cezih", "activity"] })

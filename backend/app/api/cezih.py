@@ -739,6 +739,8 @@ async def update_visit(
     org_code, source_oid = await _get_tenant_cezih_config(db, current_user.tenant_id)
     return await cezih.dispatch_update_visit(
         visit_id, mbo, data.reason,
+        nacin_prijema=data.nacin_prijema,
+        diagnosis_case_id=data.diagnosis_case_id,
         db=db, user_id=current_user.id, tenant_id=current_user.tenant_id,
         http_client=_http_client(request),
         practitioner_id=current_user.practitioner_id or "",

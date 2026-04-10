@@ -591,6 +591,7 @@ async def list_visits(client: httpx.AsyncClient, patient_mbo: str) -> list[dict]
             sp = enc.get("serviceProvider", {})
             sp_ident = sp.get("identifier", {}) if isinstance(sp, dict) else {}
             sp_code = sp_ident.get("value", "") if isinstance(sp_ident, dict) else ""
+            logger.info("Visit %s serviceProvider raw: %s → code: %r", visit_id, sp, sp_code)
             # Extract participant practitioner ID
             participants = enc.get("participant", [])
             practitioner_val = ""
