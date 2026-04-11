@@ -824,10 +824,17 @@ async def register_foreigner(
         ],
     }
 
-    response = await fhir_client.post(
-        "patient-registry-services/api/iti93",
-        json_body=bundle,
-    )
+    # Try $process-message first (FHIR messaging pattern), fall back to direct POST
+    try:
+        response = await fhir_client.process_message(
+            "patient-registry-services/api/v1", bundle,
+        )
+    except Exception:
+        # Fallback: post raw Patient resource (some CEZIH endpoints accept this)
+        response = await fhir_client.post(
+            "patient-registry-services/api/iti93",
+            json_body=patient_resource,
+        )
     return {
         "success": True,
         "patient_id": _extract_patient_id(response),
