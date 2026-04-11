@@ -98,6 +98,16 @@ export default function CezihPage() {
 
   // Auto-bind card when detected and user has no binding
   useEffect(() => {
+    if (!user?.card_holder_name && cezihStatus) {
+      console.log("[card-bind] conditions:", {
+        agent: cezihStatus.agent_connected,
+        card: cezihStatus.card_inserted,
+        holder: cezihStatus.card_holder,
+        pending: selfBind.isPending,
+        suppress: suppressAutoBind,
+        inflight: bindingInFlight.current,
+      })
+    }
     if (
       !user?.card_holder_name &&
       cezihStatus?.agent_connected &&
@@ -114,13 +124,31 @@ export default function CezihPage() {
           toast.success("Kartica automatski povezana s vašim računom")
           refreshUser()
         },
-        onError: () => {
+        onError: (err) => {
           bindingInFlight.current = false
           setSuppressAutoBind(true)
+          toast.error(err instanceof Error ? err.message : "Automatsko povezivanje kartice nije uspjelo")
         },
       })
     }
   }, [user?.card_holder_name, cezihStatus?.agent_connected, cezihStatus?.card_inserted, cezihStatus?.card_holder, selfBind.isPending, suppressAutoBind])
+
+  const handleManualBind = () => {
+    bindingInFlight.current = true
+    setSuppressAutoBind(false)
+    selfBind.mutate(undefined, {
+      onSuccess: () => {
+        bindingInFlight.current = false
+        toast.success("Kartica povezana s vašim računom")
+        refreshUser()
+      },
+      onError: (err) => {
+        bindingInFlight.current = false
+        setSuppressAutoBind(true)
+        toast.error(err instanceof Error ? err.message : "Povezivanje kartice nije uspjelo")
+      },
+    })
+  }
 
   const handleSelfUnbind = () => {
     setSuppressAutoBind(true)
@@ -213,9 +241,24 @@ export default function CezihPage() {
                         <p className="text-sm text-muted-foreground">Povezivanje kartice...</p>
                       </>
                     ) : suppressAutoBind ? (
-                      <p className="text-sm text-muted-foreground">
-                        Kartica odpojena. Izvadite i ponovno umetnite karticu za povezivanje.
-                      </p>
+                      <div className="flex items-center gap-2">
+                        <p className="text-sm text-muted-foreground">
+                          Kartica nije povezana.
+                        </p>
+                        {cezihStatus?.agent_connected && cezihStatus?.card_inserted && (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={handleManualBind}
+                            disabled={selfBind.isPending}
+                          >
+                            {selfBind.isPending ? (
+                              <Loader2 className="h-4 w-4 animate-spin mr-1" />
+                            ) : null}
+                            Poveži
+                          </Button>
+                        )}
+                      </div>
                     ) : (
                       <p className="text-sm text-muted-foreground">
                         {!cezihStatus?.agent_connected

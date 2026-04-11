@@ -163,7 +163,7 @@ pub fn check_card_status() -> SmartCardStatus {
             };
 
             if let Some(ref name) = holder {
-                info!("Card holder: {}", name);
+                debug!("Card holder: {}", name);
             }
 
             // Update cache
