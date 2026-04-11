@@ -437,8 +437,8 @@ async def search_documents(
         params["date"] = f"ge{date_from}"
     if date_to:
         params["date"] = params.get("date", "") + f"&date=le{date_to}" if "date" in params else f"le{date_to}"
-    if status_filter:
-        params["status"] = status_filter
+    # CEZIH requires status parameter — default to "current" if not specified
+    params["status"] = status_filter or "current"
 
     import logging
     _log = logging.getLogger(__name__)
