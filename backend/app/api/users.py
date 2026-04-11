@@ -101,7 +101,7 @@ async def self_bind_card(
     if not conn:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Kartica nije umetnuta ni u jednom agentu")
 
-    # Check if card is already bound to another user in this tenant
+    # If card is bound to another user in this tenant, reassign it
     existing = await db.execute(
         select(User).where(
             User.tenant_id == current_user.tenant_id,
@@ -110,8 +110,10 @@ async def self_bind_card(
             User.is_active.is_(True),
         )
     )
-    if existing.scalar_one_or_none():
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Ova kartica je već povezana s drugim korisnikom")
+    existing_user = existing.scalar_one_or_none()
+    if existing_user:
+        existing_user.card_holder_name = None
+        existing_user.card_certificate_oib = None
 
     current_user.card_holder_name = conn.card_holder
     await db.flush()

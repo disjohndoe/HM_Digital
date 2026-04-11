@@ -98,16 +98,6 @@ export default function CezihPage() {
 
   // Auto-bind card when detected and user has no binding
   useEffect(() => {
-    if (!user?.card_holder_name && cezihStatus) {
-      console.log("[card-bind] conditions:", {
-        agent: cezihStatus.agent_connected,
-        card: cezihStatus.card_inserted,
-        holder: cezihStatus.card_holder,
-        pending: selfBind.isPending,
-        suppress: suppressAutoBind,
-        inflight: bindingInFlight.current,
-      })
-    }
     if (
       !user?.card_holder_name &&
       cezihStatus?.agent_connected &&
