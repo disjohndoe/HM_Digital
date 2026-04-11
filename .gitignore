@@ -37,8 +37,8 @@ build/
 # Logs
 *.log
 
-# Project instructions (local only)
-CLAUDE.md
+# Project instructions — now tracked in repo
+# CLAUDE.md
 
 # Scraping scripts
 scrape_contacts.py
@@ -72,7 +72,6 @@ backend/uploads/
 # Caddy volumes (safety net)
 caddy_data/
 caddy_config/
-=0.27.0
 
 # Claude Code
 .claude/

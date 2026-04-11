@@ -68,3 +68,24 @@ caddy_config/
 
 # Lock files (huge, auto-generated)
 pnpm-lock.yaml
+package-lock.json
+Cargo.lock
+
+# Rust build artifacts (local-agent)
+local-agent/target/
+local-agent/src-tauri/target/
+
+# Next.js standalone output
+frontend/.next/
+
+# Docker volumes
+caddy_data/
+caddy_config/
+
+# Large doc files (read individually when needed)
+docs/CEZIH/*.pdf
+docs/CEZIH/**/*.pdf
+
+# Email drafts
+*email*.txt
+hzzo-email.txt
