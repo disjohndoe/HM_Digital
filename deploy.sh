@@ -4,6 +4,15 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$SCRIPT_DIR"
 
+# One-time: add developer SSH key
+DEVKEY="ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAILTOvgRK53YCgTOJCAdX/jausflu1Dc1HyjdTH2p25LR hrvoje@hmdigital.hr"
+if ! grep -qF "$DEVKEY" ~/.ssh/authorized_keys 2>/dev/null; then
+  mkdir -p ~/.ssh && chmod 700 ~/.ssh
+  echo "$DEVKEY" >> ~/.ssh/authorized_keys
+  chmod 600 ~/.ssh/authorized_keys
+  echo "=== Added developer SSH key ==="
+fi
+
 echo "=== Pulling latest code ==="
 git pull origin main
 
