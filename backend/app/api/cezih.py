@@ -39,8 +39,8 @@ from app.schemas.cezih import (
     InsuranceCheckRequest,
     InsuranceCheckResponse,
     LijekItem,
-    OidLookupRequest,
-    OidLookupResponse,
+    OidGenerateRequest,
+    OidGenerateResponse,
     OrganizationItem,
     PatientCezihENalaz,
     PatientCezihERecept,
@@ -396,16 +396,16 @@ async def trigger_drug_sync(
 # ============================================================
 
 
-@router.post("/oid-lookup", response_model=OidLookupResponse)
-async def oid_lookup(
+@router.post("/oid-generate", response_model=OidGenerateResponse)
+async def oid_generate(
     request: Request,
-    data: OidLookupRequest,
+    data: OidGenerateRequest,
     current_user: User = Depends(require_roles("admin", "doctor")),
     db: AsyncSession = Depends(get_db),
 ):
     await check_cezih_access(db, current_user.tenant_id)
-    return await cezih.oid_lookup(
-        data.oid,
+    return await cezih.oid_generate(
+        data.quantity,
         db=db, user_id=current_user.id, tenant_id=current_user.tenant_id,
         http_client=_http_client(request),
     )
@@ -500,8 +500,10 @@ async def register_foreigner(
     from app.models.patient import Patient
 
     await check_cezih_access(db, current_user.tenant_id)
+    org_code, source_oid = await _get_tenant_cezih_config(db, current_user.tenant_id)
     result = await cezih.foreigner_registration(
         data.model_dump(),
+        org_code=org_code, source_oid=source_oid,
         db=db, user_id=current_user.id, tenant_id=current_user.tenant_id,
         http_client=_http_client(request),
     )
@@ -648,6 +650,7 @@ async def replace_document(
 ):
     await check_cezih_access(db, current_user.tenant_id)
     org_code, source_oid = await _get_tenant_cezih_config(db, current_user.tenant_id)
+    practitioner_name = f"{current_user.ime} {current_user.prezime}".strip() if hasattr(current_user, "ime") else ""
     return await cezih.dispatch_replace_document(
         reference_id,
         record_id=data.record_id if data else None,
@@ -655,6 +658,9 @@ async def replace_document(
         http_client=_http_client(request),
         org_code=org_code,
         practitioner_id=current_user.practitioner_id,
+        practitioner_name=practitioner_name,
+        encounter_id=data.encounter_id if data else "",
+        case_id=data.case_id if data else "",
     )
 
 

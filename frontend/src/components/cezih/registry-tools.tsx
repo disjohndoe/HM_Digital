@@ -1,7 +1,7 @@
 "use client"
 
 import { useState } from "react"
-import { Search, Loader2 } from "lucide-react"
+import { Search, Loader2, Plus } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -9,16 +9,18 @@ import { Label } from "@/components/ui/label"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import {
-  useOidLookup,
+  useOidGenerate,
   useOrganizationSearch,
   usePractitionerSearch,
   useValueSetExpand,
+  useCodeSystemQuery,
 } from "@/lib/hooks/use-cezih"
 
 export function RegistryTools() {
   return (
     <div className="space-y-6">
-      <OidLookupCard />
+      <OidGenerateCard />
+      <CodeSystemQueryCard />
       <OrganizationSearchCard />
       <PractitionerSearchCard />
       <ValueSetExpandCard />
@@ -26,45 +28,95 @@ export function RegistryTools() {
   )
 }
 
-function OidLookupCard() {
-  const [oid, setOid] = useState("")
-  const mutation = useOidLookup()
-
-  const handleSearch = () => {
-    if (!oid.trim()) return
-    mutation.mutate(oid.trim())
-  }
+function OidGenerateCard() {
+  const mutation = useOidGenerate()
 
   return (
     <Card>
       <CardHeader className="pb-3">
         <div className="flex items-center gap-2">
-          <CardTitle className="text-base">OID registar (TC6)</CardTitle>
+          <CardTitle className="text-base">OID generiranje (TC6)</CardTitle>
         </div>
       </CardHeader>
       <CardContent className="space-y-3">
-        <div className="flex gap-2">
-          <Input
-            placeholder="Unesite OID (npr. 2.16.840.1.113883.2.7...)"
-            value={oid}
-            onChange={(e) => setOid(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && handleSearch()}
-            className="flex-1"
-          />
-          <Button onClick={handleSearch} disabled={mutation.isPending || !oid.trim()}>
-            {mutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
-          </Button>
-        </div>
+        <Button onClick={() => mutation.mutate()} disabled={mutation.isPending}>
+          {mutation.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Plus className="mr-2 h-4 w-4" />}
+          Generiraj OID
+        </Button>
         {mutation.data && (
           <div className="rounded-lg border p-3 text-sm space-y-1">
-            <div><span className="text-muted-foreground">OID:</span> <span className="font-mono">{mutation.data.oid}</span></div>
-            <div><span className="text-muted-foreground">Naziv:</span> {mutation.data.name}</div>
-            <div><span className="text-muted-foreground">Organizacija:</span> {mutation.data.responsible_org}</div>
-            <div><span className="text-muted-foreground">Status:</span> <Badge variant="secondary">{mutation.data.status}</Badge></div>
+            <div><span className="text-muted-foreground">Generirani OID:</span> <span className="font-mono select-all">{mutation.data.generated_oid}</span></div>
+            {mutation.data.oids.length > 1 && (
+              <div><span className="text-muted-foreground">Svi OID-ovi:</span> {mutation.data.oids.join(", ")}</div>
+            )}
           </div>
         )}
         {mutation.error && (
           <p className="text-sm text-destructive">{mutation.error.message}</p>
+        )}
+      </CardContent>
+    </Card>
+  )
+}
+
+const CODE_SYSTEMS = [
+  { value: "nacin-prijema", label: "Način prijema (nacin-prijema)" },
+  { value: "vrsta-posjete", label: "Vrsta posjete (vrsta-posjete)" },
+  { value: "hr-tip-posjete", label: "Tip posjete (hr-tip-posjete)" },
+  { value: "djelatnosti-zz", label: "Djelatnosti (djelatnosti-zz)" },
+  { value: "icd10-hr", label: "ICD-10 HR (icd10-hr)" },
+]
+
+function CodeSystemQueryCard() {
+  const [system, setSystem] = useState("nacin-prijema")
+  const [query, setQuery] = useState("")
+  const { data: results, isLoading } = useCodeSystemQuery(system, query, true)
+
+  return (
+    <Card>
+      <CardHeader className="pb-3">
+        <div className="flex items-center gap-2">
+          <CardTitle className="text-base">Pretraga šifrarnika — SVCM ITI-96 (TC7)</CardTitle>
+        </div>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        <div className="grid grid-cols-2 gap-2">
+          <div className="space-y-1">
+            <Label className="text-xs">Šifrarnik</Label>
+            <select
+              className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs"
+              value={system}
+              onChange={(e) => setSystem(e.target.value)}
+            >
+              {CODE_SYSTEMS.map((cs) => (
+                <option key={cs.value} value={cs.value}>{cs.label}</option>
+              ))}
+            </select>
+          </div>
+          <div className="space-y-1">
+            <Label className="text-xs">Pretraga (opcionalno)</Label>
+            <Input
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Kod ili naziv"
+              className="text-xs"
+            />
+          </div>
+        </div>
+        {isLoading && <div className="flex items-center gap-2 text-sm text-muted-foreground"><Loader2 className="h-4 w-4 animate-spin" /> Pretraga...</div>}
+        {results && results.length > 0 && (
+          <div className="space-y-1">
+            <p className="text-xs text-muted-foreground">Rezultata: {results.length}</p>
+            {results.map((c) => (
+              <div key={c.code} className="flex items-center gap-2 rounded-md bg-muted px-3 py-1.5 text-sm">
+                <Badge variant="outline" className="font-mono text-xs">{c.code}</Badge>
+                <span>{c.display}</span>
+              </div>
+            ))}
+          </div>
+        )}
+        {results && results.length === 0 && (
+          <p className="text-sm text-muted-foreground">Nema rezultata za odabrani šifrarnik</p>
         )}
       </CardContent>
     </Card>
@@ -150,7 +202,7 @@ function PractitionerSearchCard() {
 }
 
 function ValueSetExpandCard() {
-  const [url, setUrl] = useState("http://terminology.hl7.org/CodeSystem/condition-ver-status")
+  const [url, setUrl] = useState("http://fhir.cezih.hr/specifikacije/CodeSystem/nacin-prijema")
   const [filter, setFilter] = useState("")
   const { data, isLoading } = useValueSetExpand(url, filter)
 

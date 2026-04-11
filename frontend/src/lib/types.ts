@@ -637,12 +637,10 @@ export interface LijekItem {
 // TC6: OID Registry
 // ============================================================
 
-export interface OidLookupResponse {
+export interface OidGenerateResponse {
 
-  oid: string;
-  name: string;
-  responsible_org: string;
-  status: string;
+  generated_oid: string;
+  oids: string[];
 }
 
 // ============================================================

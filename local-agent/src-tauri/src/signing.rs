@@ -76,7 +76,7 @@ unsafe fn sign_for_jws_inner(bundle_json: &[u8]) -> Result<JwsSignResult, String
         return Err("Failed to open certificate store".into());
     }
 
-    let mut certs = find_all_certs(store, ENCODING);
+    let certs = find_all_certs(store, ENCODING);
     if certs.is_empty() {
         CertCloseStore(store, 0);
         return Err("No certificates found. Is the AKD smart card inserted?".into());

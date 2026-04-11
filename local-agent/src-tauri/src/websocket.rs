@@ -480,10 +480,13 @@ pub fn spawn_connection_task(
                                                                         "headers": {},
                                                                     });
                                                                     let resp = handle_http_proxy(warmup_msg, sess).await;
-                                                                    if resp.contains("\"status_code\"") {
-                                                                        info!("CEZIH session established — future requests won't prompt for PIN");
-                                                                    } else {
-                                                                        warn!("CEZIH session warmup failed — PIN will be prompted on first request");
+                                                                    // Parse status code for clearer logging
+                                                                    let status = serde_json::from_str::<serde_json::Value>(&resp)
+                                                                        .ok()
+                                                                        .and_then(|v| v.get("status_code").and_then(|s| s.as_u64()));
+                                                                    match status {
+                                                                        Some(code) => info!("CEZIH session established (warmup {code}) — future requests won't prompt for PIN"),
+                                                                        None => warn!("CEZIH session warmup failed — PIN will be prompted on first request"),
                                                                     }
                                                                     drop(tx);
                                                                 });

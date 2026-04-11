@@ -154,16 +154,14 @@ class LijekItem(BaseModel):
 # ============================================================
 
 
-class OidLookupRequest(BaseModel):
-    oid: str
+class OidGenerateRequest(BaseModel):
+    quantity: int = 1
 
 
-class OidLookupResponse(BaseModel):
+class OidGenerateResponse(BaseModel):
 
-    oid: str
-    name: str
-    responsible_org: str
-    status: str
+    generated_oid: str
+    oids: list[str] = []
 
 
 # ============================================================
@@ -366,6 +364,8 @@ class CaseActionResponse(BaseModel):
 class ReplaceDocumentRequest(BaseModel):
     patient_id: UUID | None = None
     record_id: UUID | None = None
+    encounter_id: str = ""
+    case_id: str = ""
 
 
 class DocumentActionResponse(BaseModel):

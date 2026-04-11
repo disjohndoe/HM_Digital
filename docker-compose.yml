@@ -74,7 +74,14 @@ services:
         else
           echo "[$$TIMESTAMP] Backup completed and encrypted ($$BACKUP_SIZE bytes)"
         fi
-        # Retention: indefinite — legal requirement 5 years (Zakon o zaštiti pacijenata)
+        # Retention: keep all backups (5-year legal requirement)
+        # Safety valve: if /backups exceeds 10 GB, remove oldest until under limit
+        while [ "$$(du -sb /backups 2>/dev/null | cut -f1)" -gt 10737418240 ]; do
+          OLDEST=$$(ls -t /backups/medical_mvp_*.gpg 2>/dev/null | tail -1)
+          if [ -z "$$OLDEST" ]; then break; fi
+          echo "[$$TIMESTAMP] WARNING: /backups exceeds 10 GB, removing $$OLDEST"
+          rm -f "$$OLDEST"
+        done
         sleep 14400
       done'
     depends_on:

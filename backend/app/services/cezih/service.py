@@ -117,25 +117,24 @@ async def check_insurance(client: httpx.AsyncClient, mbo: str) -> dict:
     raise CezihError("Unexpected CEZIH response format for patient lookup")
 
 
-async def send_enalaz(
-    client: httpx.AsyncClient,
+async def _build_document_bundle(
+    fhir_client: "CezihFhirClient",
     patient_data: dict,
     record_data: dict,
     practitioner_id: str | None = None,
     org_code: str = "",
-    source_oid: str = "",
     encounter_id: str = "",
     case_id: str = "",
     practitioner_name: str = "",
-) -> dict:
-    """Send clinical document / finding (ITI-65 MHD).
+    relates_to: dict | None = None,
+) -> tuple[dict, str]:
+    """Build a complete ITI-65 transaction bundle for document submission/replace.
 
-    Builds an IHE MHD transaction Bundle (type="transaction") with SubmissionSet (List)
-    + DocumentReference, signs it via extsigner/smartcard, and POSTs to doc-mhd-svc.
+    Returns (bundle_dict, doc_ref_id_placeholder).
+    Shared by send_enalaz (TC18) and replace_document (TC19).
     """
     import base64
-
-    fhir_client = CezihFhirClient(client)
+    import uuid as _uuid
 
     # Build clinical content text
     content_parts: list[str] = []
@@ -165,15 +164,11 @@ async def send_enalaz(
     clinical_text = "\n".join(content_parts)
     clinical_b64 = base64.b64encode(clinical_text.encode("utf-8")).decode("ascii") if clinical_text else None
 
-    # Build DocumentReference per HRMinimalDocumentReference profile
-    import uuid as _uuid
     doc_uuid = str(_uuid.uuid4())
     coding = get_cezih_document_coding(record_data.get("tip", "nalaz"))
     patient_display = f"{patient_data.get('ime', '')} {patient_data.get('prezime', '')}".strip()
 
-    # Generate document OID via CEZIH identifier registry (TC6)
-    # masterIdentifier MUST be a valid OID — UUID format is rejected
-    # oidType is a Coding with system + code per CEZIH spec
+    # Generate document OID via CEZIH identifier registry
     doc_oid = ""
     try:
         oid_result = await fhir_client.post(
@@ -274,7 +269,6 @@ async def send_enalaz(
         }
 
     # Context: encounter, case, period, practiceSetting (CEZIHDR-005/006/008/011)
-    # practiceSetting must use djelatnosti-zz ValueSet (NOT hr-tip-posjete)
     context: dict = {
         "period": {
             "start": record_data.get("created_at", _now_iso()),
@@ -306,45 +300,36 @@ async def send_enalaz(
         }]
     doc_ref_dict["context"] = context
 
-    # Content: Binary resource referenced via URL (inline data is forbidden, max=0)
-    # IHE MHD pattern: DocumentReference.content.attachment.url -> Binary fullUrl
-    import uuid as _uuid_binary
-    binary_uuid = str(_uuid_binary.uuid4())
-    binary_resource: dict | None = None
+    # relatesTo for replace operations (TC19)
+    if relates_to:
+        doc_ref_dict["relatesTo"] = [relates_to]
 
+    # Content: Binary resource referenced via URL (inline data is forbidden, max=0)
+    binary_uuid = str(_uuid.uuid4())
     if clinical_b64:
-        binary_resource = {
+        binary_resource: dict = {
             "resourceType": "Binary",
             "contentType": "text/plain",
             "data": clinical_b64,
         }
-        doc_ref_dict["content"] = [{
-            "attachment": {
-                "contentType": "text/plain",
-                "language": "hr-HR",
-                "url": f"urn:uuid:{binary_uuid}",
-            }
-        }]
     else:
-        doc_ref_dict["content"] = [{
-            "attachment": {
-                "contentType": "text/plain",
-                "language": "hr-HR",
-                "url": f"urn:uuid:{binary_uuid}",
-            }
-        }]
         binary_resource = {
             "resourceType": "Binary",
             "contentType": "text/plain",
             "data": "",
         }
+    doc_ref_dict["content"] = [{
+        "attachment": {
+            "contentType": "text/plain",
+            "language": "hr-HR",
+            "url": f"urn:uuid:{binary_uuid}",
+        }
+    }]
 
-    # Build IHE MHD ITI-65 transaction bundle (NOT a message bundle!)
-    # ITI-65 requires type="transaction" with SubmissionSet + DocumentReference + Binary entries
+    # Build IHE MHD ITI-65 transaction bundle
     entries = [doc_ref_dict]
-    if binary_resource:
-        binary_resource["_uuid"] = binary_uuid
-        entries.append(binary_resource)
+    binary_resource["_uuid"] = binary_uuid
+    entries.append(binary_resource)
 
     bundle_dict = build_iti65_transaction_bundle(
         entries,
@@ -352,31 +337,51 @@ async def send_enalaz(
         author_practitioner_id=practitioner_id,
     )
 
-    # NOTE: ITI-65 transaction bundles are NOT signed via extsigner.
-    # Extsigner only accepts FHIR message bundles (visits/cases).
-    # ITI-65 uses mTLS session authentication — signature is optional per spec.
+    return bundle_dict, doc_uuid
+
+
+def _extract_ref_id_from_response(response: dict) -> str:
+    """Extract DocumentReference ID from an ITI-65 response."""
+    if response.get("resourceType") == "DocumentReference":
+        return response.get("id", "")
+    if response.get("resourceType") == "Bundle":
+        for entry in response.get("entry", []):
+            resource = entry.get("resource", {})
+            if resource.get("resourceType") == "DocumentReference":
+                return resource.get("id", "")
+    return ""
+
+
+async def send_enalaz(
+    client: httpx.AsyncClient,
+    patient_data: dict,
+    record_data: dict,
+    practitioner_id: str | None = None,
+    org_code: str = "",
+    source_oid: str = "",
+    encounter_id: str = "",
+    case_id: str = "",
+    practitioner_name: str = "",
+) -> dict:
+    """Send clinical document / finding (ITI-65 MHD)."""
+    fhir_client = CezihFhirClient(client)
+
+    bundle_dict, _ = await _build_document_bundle(
+        fhir_client, patient_data, record_data,
+        practitioner_id=practitioner_id, org_code=org_code,
+        encounter_id=encounter_id, case_id=case_id,
+        practitioner_name=practitioner_name,
+    )
 
     response = await fhir_client.post(
         "doc-mhd-svc/api/v1/iti-65-service",
         json_body=bundle_dict,
     )
 
-    # Extract reference ID from response
-    ref_id = ""
-    if response.get("resourceType") == "DocumentReference":
-        ref_id = response.get("id", "")
-    elif response.get("resourceType") == "Bundle":
-        entries = response.get("entry", [])
-        for entry in entries:
-            resource = entry.get("resource", {})
-            if resource.get("resourceType") == "DocumentReference":
-                ref_id = resource.get("id", "")
-                break
-
+    ref_id = _extract_ref_id_from_response(response)
     if not ref_id:
         ref_id = f"FHIR-{datetime.now(UTC).strftime('%Y%m%d%H%M%S')}"
 
-    # Extract signature data from the bundle for persistence
     signature_data = bundle_dict.get("signature", {})
     signature_base64 = signature_data.get("data", "") if signature_data else ""
 
@@ -558,21 +563,26 @@ def _map_fhir_status(status: str) -> str:
 # ============================================================
 
 
-async def lookup_oid(client: httpx.AsyncClient, oid: str) -> dict:
-    """Look up OID in CEZIH identifier registry (TC6).
+async def generate_oid(client: httpx.AsyncClient, quantity: int = 1) -> dict:
+    """Generate OID(s) via CEZIH identifier registry (TC6).
 
-    Official endpoint: identifier-registry-services/api/v1/oid/generateOIDBatch (port 9443).
+    Uses the same generateOIDBatch call proven in send_enalaz (TC18).
     """
     fhir_client = CezihFhirClient(client)
     response = await fhir_client.post(
         "identifier-registry-services/api/v1/oid/generateOIDBatch",
-        json_body={"oid": oid},
+        json_body={
+            "oidType": {
+                "system": "http://ent.hr/fhir/CodeSystem/ehe-oid-types",
+                "code": "1",
+            },
+            "quantity": quantity,
+        },
     )
+    oids = response.get("oid") or response.get("oids") or []
     return {
-        "oid": oid,
-        "name": response.get("name", ""),
-        "responsible_org": response.get("responsibleOrg", ""),
-        "status": response.get("status", ""),
+        "generated_oid": oids[0] if oids else "",
+        "oids": oids,
     }
 
 
@@ -757,9 +767,23 @@ async def find_practitioners(client: httpx.AsyncClient, name: str) -> list[dict]
 # ============================================================
 
 
-async def register_foreigner(client: httpx.AsyncClient, patient_data: dict) -> dict:
-    """Register a foreigner in CEZIH (PMIR)."""
+async def register_foreigner(
+    client: httpx.AsyncClient,
+    patient_data: dict,
+    org_code: str = "",
+    source_oid: str = "",
+) -> dict:
+    """Register a foreigner in CEZIH (PMIR ITI-93).
+
+    IHE PMIR requires a Bundle type="message" with MessageHeader + Patient.
+    """
+    import uuid as _uuid
+
     fhir_client = CezihFhirClient(client)
+    patient_uuid = str(_uuid.uuid4())
+    header_uuid = str(_uuid.uuid4())
+
+    # Build Patient resource
     patient_resource = {
         "resourceType": "Patient",
         "name": [{"family": patient_data["prezime"], "given": [patient_data["ime"]]}],
@@ -778,20 +802,67 @@ async def register_foreigner(client: httpx.AsyncClient, patient_data: dict) -> d
             "value": patient_data["ehic_broj"],
         })
 
-    # PMIR ITI-93: Official endpoint is /patient-registry-services/api/iti93
+    # Wrap in PMIR ITI-93 message bundle
+    source_endpoint = f"urn:oid:{source_oid}" if source_oid else f"urn:oid:{org_code}" if org_code else "urn:oid:2.16.840.1.113883.2.7"
+    bundle = {
+        "resourceType": "Bundle",
+        "type": "message",
+        "entry": [
+            {
+                "fullUrl": f"urn:uuid:{header_uuid}",
+                "resource": {
+                    "resourceType": "MessageHeader",
+                    "eventUri": "urn:ihe:iti:pmir:2019:patient-feed",
+                    "source": {"endpoint": source_endpoint},
+                    "focus": [{"reference": f"urn:uuid:{patient_uuid}"}],
+                },
+            },
+            {
+                "fullUrl": f"urn:uuid:{patient_uuid}",
+                "resource": patient_resource,
+            },
+        ],
+    }
+
     response = await fhir_client.post(
         "patient-registry-services/api/iti93",
-        json_body=patient_resource,
+        json_body=bundle,
     )
     return {
         "success": True,
-        "patient_id": response.get("id", ""),
+        "patient_id": _extract_patient_id(response),
         "mbo": _extract_mbo_from_response(response),
     }
 
 
+def _extract_patient_id(response: dict) -> str:
+    """Extract patient ID from a PMIR response (may be Bundle or Patient)."""
+    if response.get("resourceType") == "Patient":
+        return response.get("id", "")
+    if response.get("resourceType") == "Bundle":
+        for entry in response.get("entry", []):
+            resource = entry.get("resource", {})
+            if resource.get("resourceType") == "Patient":
+                return resource.get("id", "")
+    return ""
+
+
 def _extract_mbo_from_response(response: dict) -> str:
-    for ident in response.get("identifier", []):
+    """Extract MBO from a PMIR response (handles both Bundle and Patient)."""
+    # Direct Patient resource
+    if response.get("resourceType") == "Patient":
+        return _find_mbo_in_identifiers(response.get("identifier", []))
+    # Bundle response — search entries for Patient
+    if response.get("resourceType") == "Bundle":
+        for entry in response.get("entry", []):
+            resource = entry.get("resource", {})
+            if resource.get("resourceType") == "Patient":
+                return _find_mbo_in_identifiers(resource.get("identifier", []))
+    return ""
+
+
+def _find_mbo_in_identifiers(identifiers: list) -> str:
+    for ident in identifiers:
         if ident.get("system") and "MBO" in ident["system"].upper():
             return ident.get("value", "")
     return ""
@@ -1058,59 +1129,42 @@ async def replace_document(
     record_data: dict,
     practitioner_id: str | None = None,
     org_code: str = "",
+    encounter_id: str = "",
+    case_id: str = "",
+    practitioner_name: str = "",
 ) -> dict:
-    """Replace a clinical document (TC19, ITI-65 transaction bundle with relatesTo)."""
+    """Replace a clinical document (TC19, ITI-65 transaction bundle with relatesTo).
+
+    Builds a COMPLETE DocumentReference (same as send_enalaz) plus relatesTo link.
+    """
     fhir_client = CezihFhirClient(client)
-    coding = get_cezih_document_coding(record_data.get("tip", "nalaz"))
-    doc_ref_dict: dict = {
-        "resourceType": "DocumentReference",
-        "status": "current",
-        "type": {
-            "coding": [{
-                "system": coding["system"],
-                "code": coding["code"],
-                "display": coding["display"],
-            }]
-        },
-        "subject": {
-            "type": "Patient",
-            "identifier": {
-                "system": "http://fhir.cezih.hr/specifikacije/identifikatori/MBO",
-                "value": patient_data.get("mbo", ""),
-            },
-            "display": f"{patient_data.get('ime', '')} {patient_data.get('prezime', '')}".strip(),
-        },
-        "date": _now_iso(),
-        "relatesTo": [
-            {"code": "replaces", "target": {"reference": f"DocumentReference/{original_reference_id}"}},
-        ],
+
+    relates_to = {
+        "code": "replaces",
+        "target": {"reference": f"DocumentReference/{original_reference_id}"},
     }
 
-    # Build IHE MHD ITI-65 transaction bundle
-    bundle_dict = build_iti65_transaction_bundle(
-        [doc_ref_dict],
-        sender_org_code=org_code,
-        author_practitioner_id=practitioner_id,
+    bundle_dict, _ = await _build_document_bundle(
+        fhir_client, patient_data, record_data,
+        practitioner_id=practitioner_id, org_code=org_code,
+        encounter_id=encounter_id, case_id=case_id,
+        practitioner_name=practitioner_name,
+        relates_to=relates_to,
     )
-
-    # NOTE: ITI-65 transaction bundles are NOT signed — extsigner only accepts message bundles.
 
     response = await fhir_client.post(
         "doc-mhd-svc/api/v1/iti-65-service",
         json_body=bundle_dict,
     )
-    ref_id = response.get("id", f"FHIR-R-{datetime.now(UTC).strftime('%Y%m%d%H%M%S')}")
 
-    # Extract signature data from the bundle for persistence
-    signature_data = bundle_dict.get("signature", {})
-    signature_base64 = signature_data.get("data", "") if signature_data else ""
+    ref_id = _extract_ref_id_from_response(response)
+    if not ref_id:
+        ref_id = f"FHIR-R-{datetime.now(UTC).strftime('%Y%m%d%H%M%S')}"
 
     return {
         "success": True,
         "new_reference_id": ref_id,
         "replaced_reference_id": original_reference_id,
-        "signature_data": signature_base64,
-        "signed_at": signature_data.get("when") if signature_data else None,
     }
 
 
@@ -1125,11 +1179,18 @@ async def cancel_document(
     org_code: str = "",
     practitioner_id: str | None = None,
 ) -> dict:
-    """Cancel/storno a clinical document (TC20, ITI-65 transaction bundle)."""
+    """Cancel/storno a clinical document (TC20, ITI-65 transaction bundle).
+
+    Uses PUT with status="entered-in-error" on the existing DocumentReference.
+    Includes meta.profile for CEZIH slicing validation.
+    """
     fhir_client = CezihFhirClient(client)
     doc_ref: dict = {
         "resourceType": "DocumentReference",
         "id": reference_id,
+        "meta": {
+            "profile": ["http://fhir.cezih.hr/specifikacije/StructureDefinition/HR.MinimalDocumentReference"],
+        },
         "status": "entered-in-error",
     }
 
@@ -1139,8 +1200,6 @@ async def cancel_document(
         sender_org_code=org_code,
         author_practitioner_id=practitioner_id,
     )
-
-    # NOTE: ITI-65 transaction bundles are NOT signed — extsigner only accepts message bundles.
 
     await fhir_client.post(
         "doc-mhd-svc/api/v1/iti-65-service",

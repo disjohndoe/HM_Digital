@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.constants import CEZIH_ELIGIBLE_TYPES
 from app.services.cezih import service as real_service
 from app.services.cezih.exceptions import CezihError, CezihSigningError
+from app.services.cezih.message_builder import _now_iso
 
 logger = logging.getLogger(__name__)
 
@@ -474,8 +475,8 @@ async def signing_health_check(*, http_client=None) -> dict:
 # ============================================================
 
 
-async def oid_lookup(
-    oid: str,
+async def oid_generate(
+    quantity: int = 1,
     *,
     db: AsyncSession | None = None,
     user_id: UUID | None = None,
@@ -484,10 +485,10 @@ async def oid_lookup(
 ) -> dict:
     _require_audit_params(db, user_id, tenant_id)
     try:
-        result = await real_service.lookup_oid(http_client, oid)
+        result = await real_service.generate_oid(http_client, quantity)
     except CezihError as e:
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=e.message) from e
-    await _write_audit(db, tenant_id, user_id, action="oid_lookup", details={"oid": oid})
+    await _write_audit(db, tenant_id, user_id, action="oid_generate", details={"quantity": quantity})
     return result
 
 
@@ -588,6 +589,8 @@ async def practitioner_search(
 async def foreigner_registration(
     patient_data: dict,
     *,
+    org_code: str = "",
+    source_oid: str = "",
     db: AsyncSession | None = None,
     user_id: UUID | None = None,
     tenant_id: UUID | None = None,
@@ -595,7 +598,9 @@ async def foreigner_registration(
 ) -> dict:
     _require_audit_params(db, user_id, tenant_id)
     try:
-        result = await real_service.register_foreigner(http_client, patient_data)
+        result = await real_service.register_foreigner(
+            http_client, patient_data, org_code=org_code, source_oid=source_oid,
+        )
     except CezihError as e:
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=e.message) from e
     patient_name = f"{patient_data.get('ime', '')} {patient_data.get('prezime', '')}"
@@ -771,32 +776,47 @@ async def dispatch_replace_document(
     http_client=None,
     org_code: str = "",
     practitioner_id: str | None = None,
+    practitioner_name: str = "",
+    encounter_id: str = "",
+    case_id: str = "",
 ) -> dict:
+    from app.models.patient import Patient
     _require_audit_params(db, user_id, tenant_id)
 
-    # Get practitioner ID from the record for signing (fallback)
-    if not practitioner_id and record_id:
+    # Load full record and patient data from DB (same pattern as send_enalaz)
+    if record_id and not (patient_data and record_data):
         record = await _get_medical_record_by_id(db, tenant_id, record_id)
-        if record and record.doktor_id:
-            practitioner_id = str(record.doktor_id)
+        if record:
+            if not practitioner_id and record.doktor_id:
+                practitioner_id = str(record.doktor_id)
+            if not record_data:
+                record_data = {
+                    "tip": record.tip,
+                    "dijagnoza_mkb": record.dijagnoza_mkb,
+                    "dijagnoza_tekst": record.dijagnoza_tekst,
+                    "sadrzaj": record.sadrzaj,
+                    "preporucena_terapija": record.preporucena_terapija,
+                    "created_at": record.created_at.isoformat() if record.created_at else _now_iso(),
+                }
+            if not patient_data and record.patient_id:
+                patient = await db.get(Patient, record.patient_id)
+                if patient:
+                    patient_data = {
+                        "mbo": patient.mbo,
+                        "ime": patient.ime,
+                        "prezime": patient.prezime,
+                    }
 
     try:
         result = await real_service.replace_document(
             http_client, original_reference_id, patient_data or {}, record_data or {},
             practitioner_id=practitioner_id,
             org_code=org_code,
+            encounter_id=encounter_id, case_id=case_id,
+            practitioner_name=practitioner_name,
         )
     except CezihError as e:
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=e.message) from e
-
-    # Persist signature data if we have a record
-    if record_id and result.get("signature_data"):
-        record = await _get_medical_record_by_id(db, tenant_id, record_id)
-        if record and db:
-            record.cezih_signature_data = result["signature_data"]
-            if result.get("signed_at"):
-                record.cezih_signed_at = datetime.fromisoformat(result["signed_at"])
-            await db.flush()
 
     await _write_audit(
         db, tenant_id, user_id, action="e_nalaz_replace",

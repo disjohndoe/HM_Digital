@@ -20,7 +20,7 @@ import type {
   ForeignerRegistrationResponse,
   InsuranceCheckResponse,
   LijekItem,
-  OidLookupResponse,
+  OidGenerateResponse,
   OrganizationItem,
   PatientCezihSummary,
   CreateVisitRequest,
@@ -231,11 +231,11 @@ export function useDrugSearch(query: string) {
 // TC6: OID Registry Lookup
 // ============================================================
 
-export function useOidLookup() {
+export function useOidGenerate() {
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: (oid: string) =>
-      api.post<OidLookupResponse>("/cezih/oid-lookup", { oid }),
+    mutationFn: () =>
+      api.post<OidGenerateResponse>("/cezih/oid-generate", { quantity: 1 }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["cezih", "activity"] }),
   })
 }
@@ -245,12 +245,12 @@ export function useOidLookup() {
 // TC7: Code System Query
 // ============================================================
 
-export function useCodeSystemQuery(system: string, query: string) {
+export function useCodeSystemQuery(system: string, query: string, enableEmpty = false) {
   return useQuery({
     queryKey: ["cezih", "code-system", system, query],
     queryFn: () =>
       api.get<CodeSystemItem[]>(`/cezih/code-system?system=${encodeURIComponent(system)}&q=${encodeURIComponent(query)}`),
-    enabled: query.length >= 1,
+    enabled: enableEmpty ? system.length >= 1 : query.length >= 1,
   })
 }
 

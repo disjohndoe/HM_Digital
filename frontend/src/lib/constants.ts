@@ -269,7 +269,7 @@ export const CEZIH_ACTION_LABELS: Record<string, string> = {
   visit_list: "Dohvat posjeta",
   foreigner_register: "Registracija stranca",
   foreigner_registration: "Registracija stranca",
-  oid_lookup: "OID pretraga",
+  oid_generate: "OID generiranje",
   code_system_query: "Pretraga šifrarnika",
   value_set_expand: "Pretraga skupova pojmova",
   organization_search: "Pretraga organizacija",
