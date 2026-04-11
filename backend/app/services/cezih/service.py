@@ -1179,16 +1179,18 @@ async def retrieve_document(client: httpx.AsyncClient, document_url: str) -> byt
             else:
                 path = path_with_query
                 params = {}
-            response = await fhir_client.get(path, params=params)
+            response = await fhir_client.get(path, params=params, accept="*/*")
         else:
             response = await fhir_client.get(
                 "doc-mhd-svc/api/v1/iti-68-service",
                 params={"url": document_url},
+                accept="*/*",
             )
     else:
         # Reference ID — try Binary resource path
         response = await fhir_client.get(
             f"doc-mhd-svc/api/v1/Binary/{document_url}",
+            accept="*/*",
         )
 
     if isinstance(response, bytes):

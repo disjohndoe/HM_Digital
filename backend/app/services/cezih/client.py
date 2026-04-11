@@ -194,6 +194,7 @@ class CezihFhirClient:
         params: dict | None = None,
         json_body: dict | None = None,
         timeout: int | None = None,
+        accept: str | None = None,
         _attempt: int = 0,
     ) -> dict:
         url = self._full_url(path)
@@ -201,7 +202,7 @@ class CezihFhirClient:
         max_attempts = settings.CEZIH_RETRY_ATTEMPTS
 
         headers = {
-            "Accept": _FHIR_CONTENT_TYPE,
+            "Accept": accept or _FHIR_CONTENT_TYPE,
             "Content-Type": _FHIR_CONTENT_TYPE,
         }
         headers = await self._attach_auth(headers)
@@ -267,8 +268,8 @@ class CezihFhirClient:
 
         return body
 
-    async def get(self, path: str, *, params: dict | None = None, timeout: int | None = None) -> dict:
-        return await self.request("GET", path, params=params, timeout=timeout)
+    async def get(self, path: str, *, params: dict | None = None, timeout: int | None = None, accept: str | None = None) -> dict:
+        return await self.request("GET", path, params=params, timeout=timeout, accept=accept)
 
     async def post(self, path: str, *, json_body: dict | None = None) -> dict:
         return await self.request("POST", path, json_body=json_body)
