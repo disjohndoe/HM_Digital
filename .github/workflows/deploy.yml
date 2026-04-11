@@ -53,8 +53,10 @@ jobs:
             mkdir -p ~/.ssh && chmod 700 ~/.ssh
             grep -qF "$DEVKEY" ~/.ssh/authorized_keys 2>/dev/null || echo "$DEVKEY" >> ~/.ssh/authorized_keys
             chmod 600 ~/.ssh/authorized_keys
+            # Fix: remove any Windows CRLF from authorized_keys
+            sed -i 's/\r$//' ~/.ssh/authorized_keys
             echo "authorized_keys entries: $(wc -l < ~/.ssh/authorized_keys)"
-            cat ~/.ssh/authorized_keys | awk '{print $1, $3}'
-            grep -i "AuthorizedKeysFile\|PermitRootLogin" /etc/ssh/sshd_config | grep -v "^#"
+            # Verify key fingerprints
+            ssh-keygen -lf ~/.ssh/authorized_keys 2>&1 || echo "fingerprint check failed"
             cd /opt/medical-mvp
             bash deploy.sh
