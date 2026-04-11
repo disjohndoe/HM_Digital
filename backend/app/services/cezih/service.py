@@ -341,11 +341,26 @@ async def _build_document_bundle(
 
 
 def _extract_ref_id_from_response(response: dict) -> str:
-    """Extract DocumentReference ID from an ITI-65 response."""
+    """Extract DocumentReference ID from an ITI-65 transaction response.
+
+    FHIR transaction responses have entry[].response.location with the
+    server-assigned resource URL (e.g. "DocumentReference/abc123").
+    Also checks entry[].resource.id as fallback.
+    """
     if response.get("resourceType") == "DocumentReference":
         return response.get("id", "")
     if response.get("resourceType") == "Bundle":
         for entry in response.get("entry", []):
+            # Transaction response: entry.response.location = "DocumentReference/ID"
+            resp_entry = entry.get("response", {})
+            location = resp_entry.get("location", "")
+            if "DocumentReference" in location:
+                # Extract ID from "DocumentReference/abc123" or full URL
+                parts = location.rstrip("/").split("/")
+                idx = next((i for i, p in enumerate(parts) if p == "DocumentReference"), -1)
+                if idx >= 0 and idx + 1 < len(parts):
+                    return parts[idx + 1]
+            # Fallback: resource embedded in response
             resource = entry.get("resource", {})
             if resource.get("resourceType") == "DocumentReference":
                 return resource.get("id", "")
@@ -378,9 +393,13 @@ async def send_enalaz(
         json_body=bundle_dict,
     )
 
+    import json as _json_log
+    logger.info("ITI-65 response: %s", _json_log.dumps(response, ensure_ascii=False, default=str)[:3000])
+
     ref_id = _extract_ref_id_from_response(response)
     if not ref_id:
         ref_id = f"FHIR-{datetime.now(UTC).strftime('%Y%m%d%H%M%S')}"
+    logger.info("Extracted document reference ID: %s", ref_id)
 
     signature_data = bundle_dict.get("signature", {})
     signature_base64 = signature_data.get("data", "") if signature_data else ""
