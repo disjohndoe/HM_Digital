@@ -74,7 +74,7 @@ services:
         else
           echo "[$$TIMESTAMP] Backup completed and encrypted ($$BACKUP_SIZE bytes)"
         fi
-        ls -t /backups/medical_mvp_*.gpg 2>/dev/null | tail -n +31 | xargs rm -f 2>/dev/null
+        # Retention: indefinite — legal requirement 5 years (Zakon o zaštiti pacijenata)
         sleep 14400
       done'
     depends_on:
